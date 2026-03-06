@@ -183,12 +183,18 @@ ORDER BY s.name, t.name
 function Get-TableColumns {
     param($Connection, $SchemaName, $TableName)
     
-    $query = "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '$SchemaName' AND TABLE_NAME = '$TableName' ORDER BY ORDINAL_POSITION"
+    $query = "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '$SchemaName' AND TABLE_NAME = '$TableName' ORDER BY ORDINAL_POSITION"
     
     $command = New-Object System.Data.SqlClient.SqlCommand($query, $Connection)
     $reader = $command.ExecuteReader()
-    $columns = New-Object System.Data.DataTable
-    $columns.Load($reader)
+    
+    $columns = @()
+    while ($reader.Read()) {
+        $columns += [PSCustomObject]@{
+            ColumnName = $reader.GetString(0)
+            DataType = $reader.GetString(1)
+        }
+    }
     $reader.Close()
     
     return $columns
@@ -233,34 +239,31 @@ function Export-TableToChunks {
     Write-Log "    Starting export for $SchemaName.$TableName" -Level Debug
     
     # Check if columns exist
-    if ($null -eq $Columns -or $null -eq $Columns.Rows -or $Columns.Rows.Count -eq 0) {
+    if ($null -eq $Columns -or $Columns.Count -eq 0) {
         Write-Log "    No columns found for table" -Level Warning
         return @()
     }
     
-    Write-Log "    Found $($Columns.Rows.Count) columns" -Level Debug
+    Write-Log "    Found $($Columns.Count) columns" -Level Debug
     
-    # Debug: show DataTable structure
-    $dtCols = ($Columns.Columns | ForEach-Object { $_.ColumnName }) -join ', '
-    Write-Log "    DataTable columns: $dtCols" -Level Debug
-    if ($Columns.Rows.Count -gt 0) {
-        $firstRow = $Columns.Rows[0]
-        Write-Log "    First row: COLUMN_NAME=$($firstRow['COLUMN_NAME']), DATA_TYPE=$($firstRow['DATA_TYPE'])" -Level Debug
+    # Debug: show first column
+    if ($Columns.Count -gt 0) {
+        Write-Log "    First col: $($Columns[0].ColumnName) ($($Columns[0].DataType))" -Level Debug
     }
     
-    # Build column list (using INFORMATION_SCHEMA column names)
+    # Build column list
     $selectColumns = @()
     $binaryColumns = @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')
     
-    foreach ($row in $Columns.Rows) {
-        $colName = $row["COLUMN_NAME"]
-        $dataType = $row["DATA_TYPE"]
+    foreach ($col in $Columns) {
+        $colName = $col.ColumnName
+        $dataType = $col.DataType
         
-        if ($null -eq $dataType -or [string]::IsNullOrWhiteSpace("$dataType")) { 
+        if ([string]::IsNullOrWhiteSpace($dataType)) { 
             Write-Log "      Skipping column $colName - no data type" -Level Debug
             continue 
         }
-        $dataTypeLower = "$dataType".ToLower()
+        $dataTypeLower = $dataType.ToLower()
         if ($dataTypeLower -in $binaryColumns) {
             Write-Log "      Skipping binary column: $colName ($dataTypeLower)" -Level Debug
             continue
@@ -696,9 +699,9 @@ function Start-Sync {
                     # Get columns
                     $columns = Get-TableColumns -Connection $connection -SchemaName $tableInfo.Schema -TableName $tableInfo.Table
                     
-                    Write-Log "    Got $($columns.Rows.Count) columns from schema query" -Level Debug
+                    Write-Log "    Got $($columns.Count) columns from schema query" -Level Debug
                     
-                    if ($null -eq $columns -or $null -eq $columns.Rows -or $columns.Rows.Count -eq 0) {
+                    if ($null -eq $columns -or $columns.Count -eq 0) {
                         Write-Log "    No columns found, skipping (check VIEW DEFINITION permission)" -Level Warning
                         continue
                     }
