@@ -256,21 +256,19 @@ function Export-TableToChunks {
     
     Write-Log "    Found $($Columns.Rows.Count) columns" -Level Debug
     
-    # Debug: show first column's properties
+    # Debug: show column info from DataTable
     if ($Columns.Rows.Count -gt 0) {
-        $firstCol = $Columns.Rows[0]
-        $propNames = ($firstCol | Get-Member -MemberType Property | ForEach-Object { $_.Name }) -join ', '
-        Write-Log "    First column props: $propNames" -Level Debug
-        Write-Log "    First column values: Name=$($firstCol['ColumnName']), Type=$($firstCol['DataType'])" -Level Debug
+        $firstRow = $Columns.Rows.Item(0)
+        Write-Log "    Sample: ColumnName=$($firstRow.ColumnName), DataType=$($firstRow.DataType)" -Level Debug
     }
     
     # Build column list
     $selectColumns = @()
     $binaryColumns = @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')
     
-    foreach ($col in $Columns.Rows) {
-        $colName = $col["ColumnName"]
-        $dataType = $col["DataType"]
+    foreach ($row in $Columns.Rows) {
+        $colName = $row.ColumnName
+        $dataType = $row.DataType
         
         if ($null -eq $dataType -or [string]::IsNullOrWhiteSpace($dataType)) { 
             Write-Log "      Skipping column $colName - no data type" -Level Debug
