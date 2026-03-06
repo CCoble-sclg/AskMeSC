@@ -143,9 +143,14 @@ syncRoutes.post('/embeddings/generate', async (c) => {
 
     let totalEmbeddings = 0;
     const errors: string[] = [];
+    const chunkCount = meta.chunkCount ?? 0;
+
+    if (chunkCount === 0) {
+      return c.json({ error: 'No chunks to process', meta }, 400);
+    }
 
     // Process each data chunk
-    for (let i = 1; i <= meta.chunkCount; i++) {
+    for (let i = 1; i <= chunkCount; i++) {
       const chunkKey = `databases/${body.database}/tables/${body.tableKey}/data_${String(i).padStart(4, '0')}.json`;
       
       try {
@@ -185,11 +190,12 @@ syncRoutes.post('/embeddings/generate', async (c) => {
       }
     }
 
-    // Update index in D1
+    // Update index in D1 (handle undefined values)
+    const rowCount = meta.totalRows ?? 0;
     await c.env.DB.prepare(`
       INSERT OR REPLACE INTO table_index (database_name, table_key, row_count, embedding_count, last_sync)
       VALUES (?, ?, ?, ?, datetime('now'))
-    `).bind(body.database, body.tableKey, meta.totalRows, totalEmbeddings).run();
+    `).bind(body.database, body.tableKey, rowCount, totalEmbeddings).run();
 
     return c.json({
       success: true,

@@ -480,7 +480,7 @@ function Export-TableToChunks {
         totalRows = $totalRows
         chunkCount = $chunks.Count
         primaryKey = $pkColumn
-        columns = @($Columns.Rows | ForEach-Object { @{ name = $_.ColumnName; type = $_.DataType } })
+        columns = @($Columns | ForEach-Object { @{ name = $_.ColumnName; type = $_.DataType } })
         exportedAt = (Get-Date).ToString("o")
     }
     $metaData | ConvertTo-Json -Depth 5 | Set-Content -Path $metaFilePath -Encoding UTF8
