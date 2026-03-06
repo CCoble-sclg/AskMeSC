@@ -1,0 +1,66 @@
+﻿
+ Γ¢à∩╕Å wrangler 3.114.17 (update available 4.71.0)
+-----------------------------------------------
+
+node.exe : [33mΓû▓ [43;33m[[43;30mWARNING[43;33m][0m [1mThe version of Wrangler you are using is now 
+out-of-date.[0m
+At C:\Users\ccoble\AppData\Local\nodejs\node-v22.14.0-win-x64\npx.ps1:29 char:3
++   & $NODE_EXE $NPX_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([33mΓû▓ [43;3...ut-of-date.[0m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+  Please update to the latest version to prevent critical errors.
+  Run `npm install --save-dev wrangler@4` to update to the latest version.
+  After installation, run Wrangler with `npx wrangler`.
+
+
+Successfully created tail, expires at 2026-03-07T03:35:45Z
+Connected to askmesc-api, waiting for logs...
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:00 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:02 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:04 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:06 PM
+POST https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:32:07 PM
+  (log) Query type: sql (confidence: 1.00)
+  (log) Attempting SQL query path...
+  (log) SqlService created, calling queryWithNaturalLanguage...
+  (log) getAllSchemas returned 2255 schemas
+  (log) After filtering for Neon tables: 12 schemas
+  (log) Executing SQL: SELECT 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') AS month, 
+  COUNT(*) 
+FROM 
+  "dbo_AccountsPayableInvoice" 
+WHERE 
+  EXTRACT(YEAR FROM "InvoiceDate") = 2024 
+GROUP BY 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') 
+ORDER BY 
+  month LIMIT 100
+  (log) Query returned 12 rows
+  (log) SQL generated: SELECT 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') AS month, 
+  COUNT(*) 
+FROM 
+  "dbo_AccountsPayableInvoice" 
+WHERE 
+  EXTRACT(YEAR FROM "InvoiceDate") = 2024 
+GROUP BY 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') 
+ORDER BY 
+  month LIMIT 100
+  (log) Query returned 12 rows
+  (log) detectChartType: rowCount=12, question="show me invoices by month for 2024"
+  (log) detectChartType: columns=month,count, hasNumericColumn=true
+  (log) detectChartType: returning line chart
+  (log) generateResponse: chartInfo={"shouldChart":true,"type":"line","title":"Trend Over Time"}
+  (log) generateResponse: chart generated=yes
+  (log) generateResponse: chart labels=12, datasets=1
+  (log) Raw LLM response length: 229
+  (log) Raw LLM response has table: false
+  (log) After stripping length: 229
+  (log) After stripping has table: false
+  (log) Appending our markdown table
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:08 PM

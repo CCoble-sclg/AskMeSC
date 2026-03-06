@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { browser } from '$app/environment';
   import type { ChartData } from '$lib/types';
 
   let { data }: { data: ChartData } = $props();
-  let canvas: HTMLCanvasElement;
+  let canvasEl: HTMLCanvasElement | undefined = $state(undefined);
   let chart: any = null;
-  let mounted = $state(false);
-  let ChartJS: any = null;
+  let ChartJS: any = $state(null);
+  let ready = $state(false);
 
   const colors = [
     'rgba(79, 70, 229, 0.8)',
@@ -27,23 +27,23 @@
       const { Chart, registerables } = await import('chart.js');
       Chart.register(...registerables);
       ChartJS = Chart;
-      mounted = true;
-      await tick();
-      createChart();
+      ready = true;
     }
   });
 
   onDestroy(() => {
     if (chart) {
       chart.destroy();
+      chart = null;
     }
   });
 
-  function createChart() {
-    if (!canvas || !data || !ChartJS) return;
+  $effect(() => {
+    if (!ready || !canvasEl || !data || !ChartJS) return;
     
     if (chart) {
       chart.destroy();
+      chart = null;
     }
 
     const isPie = data.type === 'pie' || data.type === 'doughnut';
@@ -52,11 +52,11 @@
       ...dataset,
       backgroundColor: dataset.backgroundColor || (isPie ? colors : colors[i % colors.length]),
       borderColor: dataset.borderColor || (isPie ? borderColors : borderColors[i % borderColors.length]),
-      borderWidth: isPie ? 2 : 2,
+      borderWidth: 2,
       tension: data.type === 'line' ? 0.3 : undefined,
     }));
 
-    chart = new ChartJS(canvas, {
+    chart = new ChartJS(canvasEl, {
       type: data.type,
       data: {
         labels: data.labels,
@@ -92,12 +92,12 @@
         },
       },
     });
-  }
+  });
 </script>
 
-{#if mounted}
+{#if ready}
 <div class="chart-container">
-  <canvas bind:this={canvas}></canvas>
+  <canvas bind:this={canvasEl}></canvas>
 </div>
 {/if}
 

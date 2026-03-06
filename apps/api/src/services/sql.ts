@@ -79,7 +79,12 @@ AGGREGATION RULES (IMPORTANT):
 - When user asks for data "by vendor", "by department", etc., use GROUP BY on that column with COUNT(*) or SUM()
 - When user asks "how many" or "total", use COUNT(*) or SUM() as appropriate
 - For "by month" queries, always ORDER BY the month column
-- Example: "invoices by month" = SELECT TO_CHAR("InvoiceDate", 'YYYY-MM') AS "Month", COUNT(*) AS "Count", SUM("InvoiceAmount") AS "Total" FROM "table" GROUP BY TO_CHAR("InvoiceDate", 'YYYY-MM') ORDER BY "Month"
+
+YEAR FILTERING (CRITICAL):
+- When user asks for a specific year like "for 2024" or "in 2024", ALWAYS filter to ONLY that year
+- Use: WHERE EXTRACT(YEAR FROM "DateColumn") = 2024
+- DO NOT use >= '2024-01-01' alone - this includes future years!
+- For "invoices by month for 2024": WHERE EXTRACT(YEAR FROM "InvoiceDate") = 2024
 
 - Return ONLY the SQL query, no explanation or markdown
 - If you cannot answer with a SELECT query, return: SELECT 'Cannot generate query for this request' AS error
@@ -353,12 +358,13 @@ Query results:
 ${resultContext}
 
 Instructions:
-- Provide a clear, helpful answer based on these results
-- Start with a brief summary of the key finding
-- Use **bold** for important numbers
-- If there are multiple results, the data will be shown in a table below your answer
-- Use plain language that citizens can understand
-- Keep the response concise (2-4 sentences for simple queries)`;
+- Write ONE brief sentence summarizing the key finding
+- Optionally add ONE more sentence with a notable insight
+- Use **bold** for the most important number
+- NEVER create tables, lists, or bullet points
+- NEVER enumerate individual months or rows
+- A table and chart will be added separately
+- Maximum 2 sentences total`;
 
     const aiResponse = await this.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
       messages: [
@@ -370,6 +376,15 @@ Instructions:
     let text = 'response' in aiResponse 
       ? aiResponse.response || 'Unable to generate response'
       : 'Unable to generate response';
+
+    // Strip any markdown tables the LLM may have generated (we add our own formatted one)
+    const lines = text.split('\n');
+    const filteredLines = lines.filter(line => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('|') && trimmed.endsWith('|')) return false;
+      return true;
+    });
+    text = filteredLines.join('\n').trim();
 
     if (markdownTable && queryResult.rowCount > 1) {
       text += '\n\n' + markdownTable;
