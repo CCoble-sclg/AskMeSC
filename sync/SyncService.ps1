@@ -62,7 +62,7 @@ function Write-Log {
     switch ($Level) {
         "Error"   { Write-Host $logMessage -ForegroundColor Red }
         "Warning" { Write-Host $logMessage -ForegroundColor Yellow }
-        "Debug"   { if ($script:Config.logging.logLevel -eq "Debug") { Write-Host $logMessage -ForegroundColor Gray } }
+        "Debug"   { Write-Host $logMessage -ForegroundColor Gray }
         "Success" { Write-Host $logMessage -ForegroundColor Green }
         default   { Write-Host $logMessage }
     }
@@ -246,11 +246,15 @@ function Export-TableToChunks {
         $ExportPath
     )
     
+    Write-Log "    Starting export for $SchemaName.$TableName" -Level Debug
+    
     # Check if columns exist
     if ($null -eq $Columns -or $null -eq $Columns.Rows -or $Columns.Rows.Count -eq 0) {
         Write-Log "    No columns found for table" -Level Warning
         return @()
     }
+    
+    Write-Log "    Found $($Columns.Rows.Count) columns" -Level Debug
     
     # Build column list
     $selectColumns = @()
@@ -265,7 +269,10 @@ function Export-TableToChunks {
         $selectColumns += "[$($col.ColumnName)]"
     }
     
+    Write-Log "    Selected $($selectColumns.Count) columns for export" -Level Debug
+    
     if ($selectColumns.Count -eq 0) {
+        Write-Log "    No exportable columns (all binary?)" -Level Warning
         return @()
     }
     
@@ -690,8 +697,10 @@ function Start-Sync {
                     # Get columns
                     $columns = Get-TableColumns -Connection $connection -SchemaName $tableInfo.Schema -TableName $tableInfo.Table
                     
-                    if ($columns.Rows.Count -eq 0) {
-                        Write-Log "    No columns found, skipping" -Level Warning
+                    Write-Log "    Got $($columns.Rows.Count) columns from schema query" -Level Debug
+                    
+                    if ($null -eq $columns -or $null -eq $columns.Rows -or $columns.Rows.Count -eq 0) {
+                        Write-Log "    No columns found, skipping (check VIEW DEFINITION permission)" -Level Warning
                         continue
                     }
                     
