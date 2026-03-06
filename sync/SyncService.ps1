@@ -256,17 +256,31 @@ function Export-TableToChunks {
     
     Write-Log "    Found $($Columns.Rows.Count) columns" -Level Debug
     
+    # Debug: show first column's properties
+    if ($Columns.Rows.Count -gt 0) {
+        $firstCol = $Columns.Rows[0]
+        Write-Log "    First column props: $($firstCol | Get-Member -MemberType Property | ForEach-Object { $_.Name } | Join-String -Separator ', ')" -Level Debug
+        Write-Log "    First column values: Name=$($firstCol.ColumnName), Type=$($firstCol.DataType)" -Level Debug
+    }
+    
     # Build column list
     $selectColumns = @()
     $binaryColumns = @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')
     
     foreach ($col in $Columns.Rows) {
-        if ($null -eq $col.DataType) { continue }
-        $dataType = $col.DataType.ToString().ToLower()
-        if ($dataType -in $binaryColumns) {
+        $colName = $col["ColumnName"]
+        $dataType = $col["DataType"]
+        
+        if ($null -eq $dataType -or [string]::IsNullOrWhiteSpace($dataType)) { 
+            Write-Log "      Skipping column $colName - no data type" -Level Debug
+            continue 
+        }
+        $dataTypeLower = $dataType.ToString().ToLower()
+        if ($dataTypeLower -in $binaryColumns) {
+            Write-Log "      Skipping binary column: $colName ($dataTypeLower)" -Level Debug
             continue
         }
-        $selectColumns += "[$($col.ColumnName)]"
+        $selectColumns += "[$colName]"
     }
     
     Write-Log "    Selected $($selectColumns.Count) columns for export" -Level Debug
