@@ -734,7 +734,7 @@ function Start-Sync {
                     
                     # Upload table metadata
                     $tableKey = $tableInfo.FullName -replace '\.', '_'
-                    $metaFilePath = Join-Path $dbExportPath $tableKey "_meta.json"
+                    $metaFilePath = Join-Path (Join-Path $dbExportPath $tableKey) "_meta.json"
                     $metaR2Key = "databases/$($dbConfig.name)/tables/$tableKey/_meta.json"
                     Upload-TableMetaToR2 -MetaFilePath $metaFilePath -R2Key $metaR2Key -CloudflareConfig $script:Config.cloudflare | Out-Null
                     

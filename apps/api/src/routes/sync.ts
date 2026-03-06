@@ -25,24 +25,35 @@ syncRoutes.use('*', validateApiKey);
 
 // Upload JSON content to R2
 syncRoutes.post('/r2/upload', async (c) => {
-  const body = await c.req.json<{
-    key: string;
-    content: string;
-    contentType?: string;
-  }>();
-
-  if (!body.key || !body.content) {
-    return c.json({ error: 'Key and content are required' }, 400);
+  let body: { key?: string; content?: unknown; contentType?: string };
+  
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return c.json({ error: 'Invalid JSON body', details: String(e) }, 400);
   }
 
+  if (!body.key) {
+    return c.json({ error: 'Key is required' }, 400);
+  }
+  
+  if (body.content === undefined || body.content === null) {
+    return c.json({ error: 'Content is required' }, 400);
+  }
+
+  // Ensure content is a string
+  const contentStr = typeof body.content === 'string' 
+    ? body.content 
+    : JSON.stringify(body.content);
+
   try {
-    await c.env.STORAGE.put(body.key, body.content, {
+    await c.env.STORAGE.put(body.key, contentStr, {
       httpMetadata: {
         contentType: body.contentType || 'application/json',
       },
     });
 
-    return c.json({ success: true, key: body.key });
+    return c.json({ success: true, key: body.key, size: contentStr.length });
   } catch (error) {
     console.error('R2 upload error:', error);
     return c.json({ error: 'Upload failed', details: String(error) }, 500);
