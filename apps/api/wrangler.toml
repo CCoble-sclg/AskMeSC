@@ -6,7 +6,7 @@ compatibility_date = "2024-12-30"
 [[d1_databases]]
 binding = "DB"
 database_name = "askmesc-db"
-database_id = "YOUR_D1_DATABASE_ID"  # Replace after running: npm run db:create
+database_id = "4a42210a-de2e-4711-af94-eb232f4fb336"
 
 # R2 Storage binding
 [[r2_buckets]]

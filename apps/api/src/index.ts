@@ -9,7 +9,12 @@ const app = new Hono<{ Bindings: Env }>();
 
 // CORS for the frontend
 app.use('*', cors({
-  origin: ['http://localhost:5173', 'https://askmesc.pages.dev'],
+  origin: (origin) => {
+    if (!origin) return 'https://askmesc.pages.dev';
+    if (origin === 'http://localhost:5173') return origin;
+    if (origin.endsWith('.askmesc.pages.dev') || origin === 'https://askmesc.pages.dev') return origin;
+    return 'https://askmesc.pages.dev';
+  },
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Sync-API-Key'],
 }));
