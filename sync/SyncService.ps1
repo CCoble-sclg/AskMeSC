@@ -90,9 +90,14 @@ function Load-Configuration {
     
     $config = Get-Content $Path -Raw | ConvertFrom-Json
     
-    # Convert relative export path to absolute (relative to config file location)
-    $configDir = Split-Path -Parent (Resolve-Path $Path)
-    $baseDir = Split-Path -Parent $configDir
+    # Convert relative export path to absolute (relative to AskMeSC root folder)
+    # $PSScriptRoot is the sync folder, parent is the AskMeSC folder
+    $scriptFolder = $PSScriptRoot
+    if (-not $scriptFolder) {
+        $scriptFolder = Split-Path -Parent $MyInvocation.MyCommand.Path
+    }
+    $baseDir = Split-Path -Parent $scriptFolder
+    
     if ($config.sync.exportPath -match '^\./|^\.\\') {
         $relativePath = $config.sync.exportPath -replace '^\./|^\.\\', ''
         $config.sync.exportPath = Join-Path $baseDir $relativePath
