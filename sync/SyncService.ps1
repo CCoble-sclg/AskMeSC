@@ -203,17 +203,32 @@ function Get-TableData {
         $SchemaName,
         $TableName,
         $Columns,
-        [int]$MaxRecords
+        [int]$MaxRecords,
+        $DiscoveryConfig
     )
     
     # Build column list, excluding binary types
     $selectColumns = @()
+    $dateColumn = $null
+    
     foreach ($col in $Columns.Rows) {
         $dataType = $col.DataType.ToLower()
         if ($dataType -in @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')) {
             continue
         }
         $selectColumns += "[$($col.ColumnName)]"
+        
+        # Check if this is a date column we can filter on
+        if ($null -eq $dateColumn -and $DiscoveryConfig.dateColumnNames) {
+            foreach ($dateName in $DiscoveryConfig.dateColumnNames) {
+                if ($col.ColumnName -eq $dateName -or $col.ColumnName -like "*$dateName*") {
+                    if ($dataType -in @('datetime', 'datetime2', 'date', 'smalldatetime')) {
+                        $dateColumn = $col.ColumnName
+                        break
+                    }
+                }
+            }
+        }
     }
     
     if ($selectColumns.Count -eq 0) {
@@ -221,7 +236,35 @@ function Get-TableData {
     }
     
     $columnList = $selectColumns -join ", "
-    $query = "SELECT TOP $MaxRecords $columnList FROM [$SchemaName].[$TableName]"
+    
+    # Determine sync strategy
+    $isFullSyncTable = $false
+    if ($DiscoveryConfig.fullSyncTables) {
+        foreach ($fst in $DiscoveryConfig.fullSyncTables) {
+            if ($TableName -eq $fst -or $TableName -like "*$fst*") {
+                $isFullSyncTable = $true
+                break
+            }
+        }
+    }
+    
+    # Build query based on strategy
+    if ($isFullSyncTable) {
+        # Full sync - no limit
+        $query = "SELECT $columnList FROM [$SchemaName].[$TableName]"
+        Write-Log "  Strategy: Full sync (reference table)" -Level Info
+    }
+    elseif ($dateColumn -and $DiscoveryConfig.dateFilterYears) {
+        # Date filter
+        $yearsBack = $DiscoveryConfig.dateFilterYears
+        $query = "SELECT $columnList FROM [$SchemaName].[$TableName] WHERE [$dateColumn] >= DATEADD(year, -$yearsBack, GETDATE()) ORDER BY [$dateColumn] DESC"
+        Write-Log "  Strategy: Date filter on [$dateColumn] (last $yearsBack years)" -Level Info
+    }
+    else {
+        # Default - use TOP limit
+        $query = "SELECT TOP $MaxRecords $columnList FROM [$SchemaName].[$TableName]"
+        Write-Log "  Strategy: TOP $MaxRecords rows" -Level Info
+    }
     
     Write-Log "  Query: $query" -Level Debug
     
@@ -559,7 +602,7 @@ function Start-Sync {
                 
                 # Get data
                 $maxRecords = $script:Config.sync.maxRecordsPerTable
-                $data = Get-TableData -Connection $connection -SchemaName $schemaName -TableName $tableName -Columns $columns -MaxRecords $maxRecords
+                $data = Get-TableData -Connection $connection -SchemaName $schemaName -TableName $tableName -Columns $columns -MaxRecords $maxRecords -DiscoveryConfig $script:Config.discovery
                 
                 if ($null -eq $data -or $data.Rows.Count -eq 0) {
                     Write-Log "  No data to sync" -Level Info
