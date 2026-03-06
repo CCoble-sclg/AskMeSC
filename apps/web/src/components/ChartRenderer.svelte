@@ -38,8 +38,8 @@
     }
   });
 
-  $effect(() => {
-    if (!ready || !canvasEl || !data || !ChartJS) return;
+  function createChart() {
+    if (!canvasEl || !data || !ChartJS) return;
     
     if (chart) {
       chart.destroy();
@@ -92,6 +92,12 @@
         },
       },
     });
+  }
+
+  $effect(() => {
+    if (ready && canvasEl && data && ChartJS) {
+      requestAnimationFrame(() => createChart());
+    }
   });
 </script>
 

@@ -64,3 +64,298 @@ ORDER BY
   (log) After stripping has table: false
   (log) Appending our markdown table
 POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:08 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:10 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:12 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:14 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:16 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:18 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:20 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:22 PM
+POST https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:32:24 PM
+  (log) Query type: sql (confidence: 1.00)
+  (log) Attempting SQL query path...
+  (log) SqlService created, calling queryWithNaturalLanguage...
+  (log) getAllSchemas returned 2255 schemas
+  (log) After filtering for Neon tables: 12 schemas
+  (log) Executing SQL: SELECT 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') AS month, 
+  COUNT(*) 
+FROM 
+  "dbo_AccountsPayableInvoice" 
+WHERE 
+  EXTRACT(YEAR FROM "InvoiceDate") = 2024 
+GROUP BY 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') 
+ORDER BY 
+  month LIMIT 100
+  (log) Query returned 12 rows
+  (log) SQL generated: SELECT 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') AS month, 
+  COUNT(*) 
+FROM 
+  "dbo_AccountsPayableInvoice" 
+WHERE 
+  EXTRACT(YEAR FROM "InvoiceDate") = 2024 
+GROUP BY 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') 
+ORDER BY 
+  month LIMIT 100
+  (log) Query returned 12 rows
+  (log) detectChartType: rowCount=12, question="show me invoices by month for 2024"
+  (log) detectChartType: columns=month,count, hasNumericColumn=true
+  (log) detectChartType: returning line chart
+  (log) generateResponse: chartInfo={"shouldChart":true,"type":"line","title":"Trend Over Time"}
+  (log) generateResponse: chart generated=yes
+  (log) generateResponse: chart labels=12, datasets=1
+  (log) Raw LLM response length: 201
+  (log) Raw LLM response has table: false
+  (log) After stripping length: 201
+  (log) After stripping has table: false
+  (log) Appending our markdown table
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:24 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:26 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:28 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:30 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:32 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:34 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:36 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:38 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:40 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:42 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:44 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:46 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:48 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:50 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:52 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:54 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:56 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:32:58 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:00 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:02 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:04 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:06 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:08 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:10 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:12 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:14 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:16 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:18 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:20 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:22 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:24 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:26 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:28 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:30 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:32 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:34 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:36 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:38 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:40 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:42 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:44 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:46 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:48 PM
+OPTIONS https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:33:50 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:49 PM
+POST https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:33:50 PM
+  (log) Query type: sql (confidence: 1.00)
+  (log) Attempting SQL query path...
+  (log) SqlService created, calling queryWithNaturalLanguage...
+  (log) getAllSchemas returned 2255 schemas
+  (log) After filtering for Neon tables: 12 schemas
+  (log) Executing SQL: SELECT 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') AS month, 
+  COUNT(*) 
+FROM 
+  "dbo_AccountsPayableInvoice" 
+WHERE 
+  EXTRACT(YEAR FROM "InvoiceDate") = 2024 
+GROUP BY 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') 
+ORDER BY 
+  month LIMIT 100
+  (log) Query returned 12 rows
+  (log) SQL generated: SELECT 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') AS month, 
+  COUNT(*) 
+FROM 
+  "dbo_AccountsPayableInvoice" 
+WHERE 
+  EXTRACT(YEAR FROM "InvoiceDate") = 2024 
+GROUP BY 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') 
+ORDER BY 
+  month LIMIT 100
+  (log) Query returned 12 rows
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:51 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:53 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:55 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:57 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:33:59 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:01 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:03 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:05 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:07 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:09 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:11 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:13 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:15 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:17 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:19 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:21 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:23 PM
+OPTIONS https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:34:26 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:25 PM
+POST https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:34:26 PM
+  (log) Query type: sql (confidence: 1.00)
+  (log) Attempting SQL query path...
+  (log) SqlService created, calling queryWithNaturalLanguage...
+  (log) getAllSchemas returned 2255 schemas
+  (log) After filtering for Neon tables: 12 schemas
+  (log) Executing SQL: SELECT 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') AS month, 
+  SUM("InvoiceAmount") AS total
+FROM 
+  "dbo_AccountsPayableInvoice"
+WHERE 
+  EXTRACT(YEAR FROM "InvoiceDate") = 2023
+GROUP BY 
+  TO_CHAR("InvoiceDate", 'YYYY-MM')
+ORDER BY 
+  month LIMIT 100
+  (log) Query returned 10 rows
+  (log) SQL generated: SELECT 
+  TO_CHAR("InvoiceDate", 'YYYY-MM') AS month, 
+  SUM("InvoiceAmount") AS total
+FROM 
+  "dbo_AccountsPayableInvoice"
+WHERE 
+  EXTRACT(YEAR FROM "InvoiceDate") = 2023
+GROUP BY 
+  TO_CHAR("InvoiceDate", 'YYYY-MM')
+ORDER BY 
+  month LIMIT 100
+  (log) Query returned 10 rows
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:27 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:29 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:31 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:33 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:35 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:37 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:39 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:41 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:43 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:45 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:47 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:49 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:51 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:53 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:55 PM
+OPTIONS https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:34:57 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:57 PM
+POST https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:34:57 PM
+  (log) Query type: sql (confidence: 1.00)
+  (log) Attempting SQL query path...
+  (log) SqlService created, calling queryWithNaturalLanguage...
+  (log) getAllSchemas returned 2255 schemas
+  (log) After filtering for Neon tables: 12 schemas
+  (log) Executing SQL: SELECT COUNT(*) AS count FROM "dbo_AccountsPayableInvoice" LIMIT 100
+  (log) Query returned 1 rows
+  (log) SQL generated: SELECT COUNT(*) AS count FROM "dbo_AccountsPayableInvoice" LIMIT 100
+  (log) Query returned 1 rows
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:34:59 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:01 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:03 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:05 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:07 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:09 PM
+OPTIONS https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:35:11 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:11 PM
+POST https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:35:11 PM
+  (log) Query type: sql (confidence: 1.00)
+  (log) Attempting SQL query path...
+  (log) SqlService created, calling queryWithNaturalLanguage...
+  (log) getAllSchemas returned 2255 schemas
+  (log) After filtering for Neon tables: 12 schemas
+  (log) Executing SQL: SELECT "InvoiceID", "InvoiceAmount" FROM "dbo_AccountsPayableInvoice" LIMIT 100
+  (log) Query returned 100 rows
+  (log) SQL generated: SELECT "InvoiceID", "InvoiceAmount" FROM "dbo_AccountsPayableInvoice" LIMIT 100
+  (log) Query returned 100 rows
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:13 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:15 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:17 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:19 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:21 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:23 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:25 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:27 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:29 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:31 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:33 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:35 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:37 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:39 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:41 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:43 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:45 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:47 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:49 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:51 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:53 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:55 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:57 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:35:59 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:01 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:03 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:05 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:07 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:09 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:11 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:13 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:15 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:17 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:19 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:21 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:23 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:25 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:27 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:29 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:31 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:33 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:35 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:37 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:39 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:41 PM
+OPTIONS https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:36:44 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:43 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:45 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:47 PM
+POST https://askmesc-api.sclg.workers.dev/api/chat - Ok @ 3/6/2026, 5:36:44 PM
+  (log) Query type: sql (confidence: 1.00)
+  (log) Attempting SQL query path...
+  (log) SqlService created, calling queryWithNaturalLanguage...
+  (log) getAllSchemas returned 2255 schemas
+  (log) After filtering for Neon tables: 12 schemas
+  (log) Executing SQL: SELECT COUNT(*) AS count, SUM("InvoiceAmount") AS amount FROM "dbo_AccountsPayableInvoice" LIMIT 100
+  (log) Query returned 1 rows
+  (log) SQL generated: SELECT COUNT(*) AS count, SUM("InvoiceAmount") AS amount FROM "dbo_AccountsPayableInvoice" LIMIT 100
+  (log) Query returned 1 rows
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:49 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:51 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:53 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:55 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:57 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:36:59 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:01 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:03 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:05 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:07 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:09 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:11 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:13 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:15 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:17 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:19 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:21 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:23 PM
+POST https://askmesc-api.sclg.workers.dev/api/sync/postgres/insert - Ok @ 3/6/2026, 5:37:25 PM
