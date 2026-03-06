@@ -378,10 +378,10 @@ function Export-TableToChunks {
             $row = $dataTable.Rows[$i]
             $record = @{}
             
-            foreach ($col in $Columns.Rows) {
+            foreach ($col in $Columns) {
                 $colName = $col.ColumnName
-                if ($null -eq $colName -or $null -eq $col.DataType) { continue }
-                $dataType = $col.DataType.ToString().ToLower()
+                if ([string]::IsNullOrEmpty($colName) -or [string]::IsNullOrEmpty($col.DataType)) { continue }
+                $dataType = $col.DataType.ToLower()
                 
                 if ($dataType -in $binaryColumns) {
                     continue
