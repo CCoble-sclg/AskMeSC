@@ -183,24 +183,7 @@ ORDER BY s.name, t.name
 function Get-TableColumns {
     param($Connection, $SchemaName, $TableName)
     
-    $query = @"
-SELECT 
-    c.name AS ColumnName,
-    t.name AS DataType,
-    c.max_length AS MaxLength,
-    c.is_nullable AS IsNullable,
-    CASE WHEN pk.column_id IS NOT NULL THEN 1 ELSE 0 END AS IsPrimaryKey
-FROM sys.columns c
-INNER JOIN sys.types t ON c.user_type_id = t.user_type_id
-LEFT JOIN (
-    SELECT ic.object_id, ic.column_id
-    FROM sys.index_columns ic
-    INNER JOIN sys.indexes i ON ic.object_id = i.object_id AND ic.index_id = i.index_id
-    WHERE i.is_primary_key = 1
-) pk ON c.object_id = pk.object_id AND c.column_id = pk.column_id
-WHERE c.object_id = OBJECT_ID('$SchemaName.$TableName')
-ORDER BY c.column_id
-"@
+    $query = "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '$SchemaName' AND TABLE_NAME = '$TableName' ORDER BY ORDINAL_POSITION"
     
     $command = New-Object System.Data.SqlClient.SqlCommand($query, $Connection)
     $reader = $command.ExecuteReader()
@@ -262,20 +245,16 @@ function Export-TableToChunks {
     Write-Log "    DataTable columns: $dtCols" -Level Debug
     if ($Columns.Rows.Count -gt 0) {
         $firstRow = $Columns.Rows[0]
-        $vals = @()
-        foreach ($dtCol in $Columns.Columns) {
-            $vals += "$($dtCol.ColumnName)=$($firstRow[$dtCol.ColumnName])"
-        }
-        Write-Log "    First row: $($vals -join ', ')" -Level Debug
+        Write-Log "    First row: COLUMN_NAME=$($firstRow['COLUMN_NAME']), DATA_TYPE=$($firstRow['DATA_TYPE'])" -Level Debug
     }
     
-    # Build column list
+    # Build column list (using INFORMATION_SCHEMA column names)
     $selectColumns = @()
     $binaryColumns = @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')
     
     foreach ($row in $Columns.Rows) {
-        $colName = $row["ColumnName"]
-        $dataType = $row["DataType"]
+        $colName = $row["COLUMN_NAME"]
+        $dataType = $row["DATA_TYPE"]
         
         if ($null -eq $dataType -or [string]::IsNullOrWhiteSpace("$dataType")) { 
             Write-Log "      Skipping column $colName - no data type" -Level Debug
