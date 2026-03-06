@@ -203,9 +203,10 @@ ORDER BY c.column_id
 "@
     
     $command = New-Object System.Data.SqlClient.SqlCommand($query, $Connection)
-    $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
+    $reader = $command.ExecuteReader()
     $columns = New-Object System.Data.DataTable
-    $adapter.Fill($columns) | Out-Null
+    $columns.Load($reader)
+    $reader.Close()
     
     return $columns
 }
