@@ -619,8 +619,8 @@ function Request-EmbeddingGeneration {
     }
     
     try {
-        # Short timeout - if embedding takes too long, continue anyway
-        $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -TimeoutSec 30
+        # Batch embedding should be faster, give it 60 seconds
+        $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -TimeoutSec 60
         return $response
     }
     catch [System.Net.WebException] {
