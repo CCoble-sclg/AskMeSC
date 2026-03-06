@@ -87,12 +87,16 @@ chatRoutes.post('/', async (c) => {
     console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)})`);
     
     if (queryType === 'sql' && c.env.NEON_DATABASE_URL) {
+      console.log('Attempting SQL query path...');
       try {
         const sqlService = new SqlService(c.env);
+        console.log('SqlService created, calling queryWithNaturalLanguage...');
         const { result, generatedSql } = await sqlService.queryWithNaturalLanguage(
           message,
           body.filters?.database
         );
+        console.log(`SQL generated: ${generatedSql}`);
+        console.log(`Query returned ${result.rowCount} rows`);
         
         const response = await sqlService.generateResponse(message, result, generatedSql);
         
@@ -110,7 +114,10 @@ chatRoutes.post('/', async (c) => {
         return c.json(chatResponse);
       } catch (sqlError) {
         console.error('SQL query failed, falling back to document search:', sqlError);
+        console.error('Error details:', String(sqlError));
       }
+    } else {
+      console.log(`Skipping SQL: queryType=${queryType}, hasNeonUrl=${!!c.env.NEON_DATABASE_URL}`);
     }
     
     const rag = new RagService(c.env);

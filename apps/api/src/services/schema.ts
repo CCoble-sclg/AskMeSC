@@ -82,8 +82,58 @@ export class SchemaService {
     }));
   }
 
-  async getSchemaContext(database?: string): Promise<string> {
-    const schemas = await this.getAllSchemas(database);
+  async searchSchemas(keywords: string[], database?: string, limit: number = 30): Promise<TableSchema[]> {
+    const allSchemas = await this.getAllSchemas(database);
+    
+    const scored = allSchemas.map(schema => {
+      let score = 0;
+      const tableLower = schema.tableName.toLowerCase();
+      const fullLower = schema.fullName.toLowerCase();
+      
+      for (const keyword of keywords) {
+        const kw = keyword.toLowerCase();
+        if (tableLower === kw) score += 10;
+        else if (tableLower.includes(kw)) score += 5;
+        else if (fullLower.includes(kw)) score += 3;
+        
+        for (const col of schema.columns) {
+          if (col.name.toLowerCase().includes(kw)) score += 1;
+        }
+      }
+      
+      if (schema.fullName.startsWith('dbo.')) score += 2;
+      
+      return { schema, score };
+    });
+    
+    return scored
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map(s => s.schema);
+  }
+
+  async getSchemasInNeon(): Promise<TableSchema[]> {
+    const neonTables = [
+      'dbo.Account', 'dbo.AccountBillingItems', 'dbo.AccountGASB', 'dbo.AccountGASBTemp',
+      'dbo.AccountsPayableBatch', 'dbo.AccountsPayableImportInvoice', 
+      'dbo.AccountsPayableImportInvoiceItem', 'dbo.AccountsPayableImportInvoiceItemGLDistribution',
+      'dbo.AccountsPayableInvoice', 'dbo.AccountsPayableInvoiceCheck', 'dbo.AccountsPayableInvoiceItem',
+      'APP.DatabaseHotfixes'
+    ];
+    
+    const allSchemas = await this.getAllSchemas();
+    console.log(`getAllSchemas returned ${allSchemas.length} schemas`);
+    const filtered = allSchemas.filter(s => neonTables.includes(s.fullName));
+    console.log(`After filtering for Neon tables: ${filtered.length} schemas`);
+    if (filtered.length === 0 && allSchemas.length > 0) {
+      console.log('Sample fullNames:', allSchemas.slice(0, 5).map(s => s.fullName));
+    }
+    return filtered;
+  }
+
+  async getSchemaContext(database?: string, searchTerms?: string[]): Promise<string> {
+    const schemas = await this.getSchemasInNeon();
     
     if (schemas.length === 0) {
       return 'No tables available.';
@@ -94,7 +144,7 @@ export class SchemaService {
     parts.push('IMPORTANT: Table names use underscores, not dots (e.g., dbo_TableName not dbo.TableName)\n');
 
     for (const schema of schemas) {
-      const postgresTableName = schema.fullName.replace('.', '_');
+      const postgresTableName = schema.fullName.replace(/\./g, '_');
       parts.push(`\nTable: "${postgresTableName}"`);
       if (schema.description) {
         parts.push(`  Description: ${schema.description}`);

@@ -450,7 +450,7 @@ syncRoutes.post('/postgres/create-table', async (c) => {
       return def;
     }).join(',\n  ');
 
-    const tableName = body.fullName.replace('.', '_');
+    const tableName = body.fullName.replace(/\./g, '_');
     
     await sql.query(`DROP TABLE IF EXISTS "${tableName}"`);
     await sql.query(`CREATE TABLE "${tableName}" (${columnDefs})`);

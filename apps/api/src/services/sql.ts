@@ -20,16 +20,59 @@ export class SqlService {
     this.schemaService = new SchemaService(env);
   }
 
+  extractKeywords(question: string): string[] {
+    const stopWords = new Set([
+      'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+      'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+      'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'dare',
+      'ought', 'used', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by',
+      'from', 'as', 'into', 'through', 'during', 'before', 'after', 'above',
+      'below', 'between', 'under', 'again', 'further', 'then', 'once', 'here',
+      'there', 'when', 'where', 'why', 'how', 'all', 'each', 'few', 'more',
+      'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own',
+      'same', 'so', 'than', 'too', 'very', 'just', 'and', 'but', 'if', 'or',
+      'because', 'until', 'while', 'what', 'which', 'who', 'whom', 'this',
+      'that', 'these', 'those', 'am', 'i', 'me', 'my', 'myself', 'we', 'our',
+      'you', 'your', 'he', 'him', 'his', 'she', 'her', 'it', 'its', 'they',
+      'them', 'their', 'show', 'get', 'find', 'list', 'give', 'tell', 'many',
+      'much', 'any', 'see', 'look', 'also', 'about'
+    ]);
+
+    const words = question.toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 2 && !stopWords.has(w));
+
+    const uniqueWords = [...new Set(words)];
+    
+    const entityKeywords = ['invoice', 'vendor', 'employee', 'payment', 'check', 
+      'account', 'department', 'batch', 'item', 'transaction', 'payable', 'receivable'];
+    
+    const prioritized = uniqueWords.sort((a, b) => {
+      const aIsEntity = entityKeywords.some(e => a.includes(e) || e.includes(a));
+      const bIsEntity = entityKeywords.some(e => b.includes(e) || e.includes(a));
+      if (aIsEntity && !bIsEntity) return -1;
+      if (!aIsEntity && bIsEntity) return 1;
+      return b.length - a.length;
+    });
+
+    return prioritized.slice(0, 10);
+  }
+
   async generateSql(question: string, database?: string): Promise<string> {
-    const schemaContext = await this.schemaService.getSchemaContext(database);
+    const keywords = this.extractKeywords(question);
+    const schemaContext = await this.schemaService.getSchemaContext(database, keywords);
     
     const prompt = `You are a SQL expert. Generate a PostgreSQL query to answer the user's question.
 
 RULES:
 - Generate ONLY a SELECT query - no INSERT, UPDATE, DELETE, or DDL
 - Always include LIMIT ${MAX_ROWS} at the end
-- Use proper table and column names from the schema
-- Use ILIKE for case-insensitive string matching
+- CRITICAL: Always use double quotes around table names exactly as shown (e.g., FROM "dbo_AccountsPayableInvoice")
+- CRITICAL: Always use double quotes around column names exactly as shown (e.g., SELECT "InvoiceDate")
+- Use ILIKE only for TEXT/VARCHAR columns, never for dates or numbers
+- For date filtering, use operators like >=, <=, BETWEEN with proper date literals (e.g., "InvoiceDate" >= '2023-01-01')
+- For year filtering, use: EXTRACT(YEAR FROM "DateColumn") = 2023
 - Return ONLY the SQL query, no explanation or markdown
 - If you cannot answer with a SELECT query, return: SELECT 'Cannot generate query for this request' AS error
 
@@ -101,13 +144,17 @@ SQL query:`;
     const startTime = Date.now();
     
     try {
-      const rows = await neonSql.query(sql);
+      console.log('Executing SQL:', sql);
+      const result = await neonSql.query(sql);
       const executionTimeMs = Date.now() - startTime;
+      
+      const resultRows = Array.isArray(result) ? result : (result.rows || []);
+      console.log(`Query returned ${resultRows.length} rows`);
 
       return {
         sql,
-        rows: rows.rows as Record<string, unknown>[],
-        rowCount: rows.rows.length,
+        rows: resultRows as Record<string, unknown>[],
+        rowCount: resultRows.length,
         executionTimeMs,
       };
     } catch (error) {
