@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { browser } from '$app/environment';
   import type { ChartData } from '$lib/types';
 
@@ -7,6 +7,7 @@
   let canvas: HTMLCanvasElement;
   let chart: any = null;
   let mounted = $state(false);
+  let ChartJS: any = null;
 
   const colors = [
     'rgba(79, 70, 229, 0.8)',
@@ -22,11 +23,13 @@
   const borderColors = colors.map(c => c.replace('0.8', '1'));
 
   onMount(async () => {
-    mounted = true;
     if (browser) {
       const { Chart, registerables } = await import('chart.js');
       Chart.register(...registerables);
-      createChart(Chart);
+      ChartJS = Chart;
+      mounted = true;
+      await tick();
+      createChart();
     }
   });
 
@@ -36,8 +39,8 @@
     }
   });
 
-  function createChart(Chart: any) {
-    if (!canvas || !data) return;
+  function createChart() {
+    if (!canvas || !data || !ChartJS) return;
     
     if (chart) {
       chart.destroy();
@@ -53,7 +56,7 @@
       tension: data.type === 'line' ? 0.3 : undefined,
     }));
 
-    chart = new Chart(canvas, {
+    chart = new ChartJS(canvas, {
       type: data.type,
       data: {
         labels: data.labels,

@@ -73,6 +73,14 @@ RULES:
 - Use ILIKE only for TEXT/VARCHAR columns, never for dates or numbers
 - For date filtering, use operators like >=, <=, BETWEEN with proper date literals (e.g., "InvoiceDate" >= '2023-01-01')
 - For year filtering, use: EXTRACT(YEAR FROM "DateColumn") = 2023
+
+AGGREGATION RULES (IMPORTANT):
+- When user asks for data "by month", use: TO_CHAR("DateColumn", 'YYYY-MM') AS month, COUNT(*) or SUM() with GROUP BY
+- When user asks for data "by vendor", "by department", etc., use GROUP BY on that column with COUNT(*) or SUM()
+- When user asks "how many" or "total", use COUNT(*) or SUM() as appropriate
+- For "by month" queries, always ORDER BY the month column
+- Example: "invoices by month" = SELECT TO_CHAR("InvoiceDate", 'YYYY-MM') AS "Month", COUNT(*) AS "Count", SUM("InvoiceAmount") AS "Total" FROM "table" GROUP BY TO_CHAR("InvoiceDate", 'YYYY-MM') ORDER BY "Month"
+
 - Return ONLY the SQL query, no explanation or markdown
 - If you cannot answer with a SELECT query, return: SELECT 'Cannot generate query for this request' AS error
 
