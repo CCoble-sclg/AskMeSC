@@ -256,10 +256,16 @@ function Export-TableToChunks {
     
     Write-Log "    Found $($Columns.Rows.Count) columns" -Level Debug
     
-    # Debug: show column info from DataTable
+    # Debug: show DataTable structure
+    $dtCols = ($Columns.Columns | ForEach-Object { $_.ColumnName }) -join ', '
+    Write-Log "    DataTable columns: $dtCols" -Level Debug
     if ($Columns.Rows.Count -gt 0) {
-        $firstRow = $Columns.Rows.Item(0)
-        Write-Log "    Sample: ColumnName=$($firstRow.Item('ColumnName')), DataType=$($firstRow.Item('DataType'))" -Level Debug
+        $firstRow = $Columns.Rows[0]
+        $vals = @()
+        foreach ($dtCol in $Columns.Columns) {
+            $vals += "$($dtCol.ColumnName)=$($firstRow[$dtCol.ColumnName])"
+        }
+        Write-Log "    First row: $($vals -join ', ')" -Level Debug
     }
     
     # Build column list
@@ -267,14 +273,14 @@ function Export-TableToChunks {
     $binaryColumns = @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')
     
     foreach ($row in $Columns.Rows) {
-        $colName = $row.Item("ColumnName")
-        $dataType = $row.Item("DataType")
+        $colName = $row["ColumnName"]
+        $dataType = $row["DataType"]
         
-        if ($null -eq $dataType -or [string]::IsNullOrWhiteSpace($dataType.ToString())) { 
+        if ($null -eq $dataType -or [string]::IsNullOrWhiteSpace("$dataType")) { 
             Write-Log "      Skipping column $colName - no data type" -Level Debug
             continue 
         }
-        $dataTypeLower = $dataType.ToString().ToLower()
+        $dataTypeLower = "$dataType".ToLower()
         if ($dataTypeLower -in $binaryColumns) {
             Write-Log "      Skipping binary column: $colName ($dataTypeLower)" -Level Debug
             continue
