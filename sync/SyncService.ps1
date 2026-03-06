@@ -259,7 +259,7 @@ function Export-TableToChunks {
     # Debug: show column info from DataTable
     if ($Columns.Rows.Count -gt 0) {
         $firstRow = $Columns.Rows.Item(0)
-        Write-Log "    Sample: ColumnName=$($firstRow.ColumnName), DataType=$($firstRow.DataType)" -Level Debug
+        Write-Log "    Sample: ColumnName=$($firstRow.Item('ColumnName')), DataType=$($firstRow.Item('DataType'))" -Level Debug
     }
     
     # Build column list
@@ -267,10 +267,10 @@ function Export-TableToChunks {
     $binaryColumns = @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')
     
     foreach ($row in $Columns.Rows) {
-        $colName = $row.ColumnName
-        $dataType = $row.DataType
+        $colName = $row.Item("ColumnName")
+        $dataType = $row.Item("DataType")
         
-        if ($null -eq $dataType -or [string]::IsNullOrWhiteSpace($dataType)) { 
+        if ($null -eq $dataType -or [string]::IsNullOrWhiteSpace($dataType.ToString())) { 
             Write-Log "      Skipping column $colName - no data type" -Level Debug
             continue 
         }
