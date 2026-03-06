@@ -90,6 +90,16 @@ function Load-Configuration {
     
     $config = Get-Content $Path -Raw | ConvertFrom-Json
     
+    # Convert relative export path to absolute (relative to config file location)
+    $configDir = Split-Path -Parent (Resolve-Path $Path)
+    $baseDir = Split-Path -Parent $configDir
+    if ($config.sync.exportPath -match '^\./|^\.\\') {
+        $relativePath = $config.sync.exportPath -replace '^\./|^\.\\', ''
+        $config.sync.exportPath = Join-Path $baseDir $relativePath
+    }
+    
+    Write-Log "  Export path: $($config.sync.exportPath)" -Level Debug
+    
     # Ensure export directory exists
     if ($config.sync.exportPath -and -not (Test-Path $config.sync.exportPath)) {
         New-Item -ItemType Directory -Path $config.sync.exportPath -Force | Out-Null
