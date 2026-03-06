@@ -537,9 +537,19 @@ function Upload-TableMetaToR2 {
         $CloudflareConfig
     )
     
+    if (-not (Test-Path $MetaFilePath)) {
+        Write-Log "      Metadata file not found: $MetaFilePath" -Level Warning
+        return $false
+    }
+    
     $uri = "$($CloudflareConfig.apiUrl)/api/sync/r2/upload"
     
     $fileContent = Get-Content -Path $MetaFilePath -Raw -Encoding UTF8
+    
+    if ([string]::IsNullOrWhiteSpace($fileContent)) {
+        Write-Log "      Metadata file is empty" -Level Warning
+        return $false
+    }
     
     $body = @{
         key = $R2Key
