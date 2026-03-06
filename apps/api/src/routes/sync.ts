@@ -149,7 +149,9 @@ syncRoutes.post('/embeddings/generate', async (c) => {
       return c.json({ error: 'No chunks to process', meta }, 400);
     }
 
-    // Process each data chunk
+    // Process each data chunk with batching
+    const BATCH_SIZE = 50; // Process 50 texts at a time
+    
     for (let i = 1; i <= chunkCount; i++) {
       const chunkKey = `databases/${body.database}/tables/${body.tableKey}/data_${String(i).padStart(4, '0')}.json`;
       
@@ -161,7 +163,9 @@ syncRoutes.post('/embeddings/generate', async (c) => {
           rows: Array<Record<string, any>>;
         }>();
 
-        // Generate embeddings for each row
+        // Collect all chunks first
+        const allChunks: Array<{ chunk: any; r2Key: string }> = [];
+        
         for (const row of chunkData.rows) {
           try {
             const textContent = embedService.buildTextContent(row);
@@ -172,17 +176,31 @@ syncRoutes.post('/embeddings/generate', async (c) => {
                 row._id || 'unknown',
                 body.tableKey
               );
-
+              
               for (const chunk of chunks) {
-                await embedService.storeEmbedding(chunk, {
-                  database: body.database,
-                  r2Key: chunkKey,
-                });
-                totalEmbeddings++;
+                allChunks.push({ chunk, r2Key: chunkKey });
               }
             }
           } catch (err) {
             errors.push(`Row ${row._id}: ${err}`);
+          }
+        }
+
+        // Process in batches
+        for (let b = 0; b < allChunks.length; b += BATCH_SIZE) {
+          const batch = allChunks.slice(b, b + BATCH_SIZE);
+          const texts = batch.map(item => item.chunk.text);
+          
+          try {
+            const embeddings = await embedService.generateEmbeddingsBatch(texts);
+            await embedService.storeEmbeddingsBatch(
+              batch.map(item => item.chunk),
+              embeddings,
+              { database: body.database, r2Key: batch[0].r2Key }
+            );
+            totalEmbeddings += batch.length;
+          } catch (err) {
+            errors.push(`Batch ${b}: ${err}`);
           }
         }
       } catch (err) {

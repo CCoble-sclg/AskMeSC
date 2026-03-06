@@ -150,6 +150,48 @@ export class EmbeddingService {
   }
 
   /**
+   * Batch generate embeddings for multiple texts
+   */
+  async generateEmbeddingsBatch(texts: string[]): Promise<number[][]> {
+    if (texts.length === 0) return [];
+    
+    const result = await this.env.AI.run('@cf/baai/bge-base-en-v1.5', {
+      text: texts,
+    }) as { data: number[][] };
+
+    return result.data;
+  }
+
+  /**
+   * Batch store multiple chunks with their embeddings
+   */
+  async storeEmbeddingsBatch(
+    chunks: EmbeddingChunk[],
+    embeddings: number[][],
+    r2Info?: { database: string; r2Key: string }
+  ): Promise<void> {
+    if (chunks.length === 0) return;
+
+    const vectors = chunks.map((chunk, i) => ({
+      id: chunk.id,
+      values: embeddings[i],
+      metadata: {
+        ...chunk.metadata,
+        textPreview: chunk.text.substring(0, 100),
+        database: r2Info?.database,
+        r2Key: r2Info?.r2Key,
+      },
+    }));
+
+    // Vectorize supports up to 1000 vectors per upsert
+    const batchSize = 100;
+    for (let i = 0; i < vectors.length; i += batchSize) {
+      const batch = vectors.slice(i, i + batchSize);
+      await this.env.VECTORS.upsert(batch);
+    }
+  }
+
+  /**
    * Search for similar chunks
    */
   async searchSimilar(
