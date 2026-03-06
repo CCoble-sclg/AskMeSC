@@ -29,7 +29,9 @@ Thumbs.db
 npm-debug.log*
 
 # Sync service
+sync/config.json
 sync/config.local.json
+sync/sync_state.json
 sync/logs/
 sync/*.log
 
