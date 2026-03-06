@@ -259,8 +259,9 @@ function Export-TableToChunks {
     # Debug: show first column's properties
     if ($Columns.Rows.Count -gt 0) {
         $firstCol = $Columns.Rows[0]
-        Write-Log "    First column props: $($firstCol | Get-Member -MemberType Property | ForEach-Object { $_.Name } | Join-String -Separator ', ')" -Level Debug
-        Write-Log "    First column values: Name=$($firstCol.ColumnName), Type=$($firstCol.DataType)" -Level Debug
+        $propNames = ($firstCol | Get-Member -MemberType Property | ForEach-Object { $_.Name }) -join ', '
+        Write-Log "    First column props: $propNames" -Level Debug
+        Write-Log "    First column values: Name=$($firstCol['ColumnName']), Type=$($firstCol['DataType'])" -Level Debug
     }
     
     # Build column list
