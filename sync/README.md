@@ -1,127 +1,179 @@
 # AskMeSC Data Sync Service
 
-PowerShell-based service that syncs data from SQL Server to Cloudflare for the AI chatbot.
+PowerShell-based service that syncs data from SQL Server to Cloudflare R2/Vectorize for the AI chatbot.
+
+## Architecture
+
+```
+SQL Server → JSON Chunks → R2 Storage → Vectorize (Embeddings)
+                              ↓
+                         D1 (Index Only)
+```
+
+- **R2**: Stores full table data as JSON chunks (unlimited storage)
+- **Vectorize**: Stores text embeddings for semantic search
+- **D1**: Lightweight index for metadata only
 
 ## Prerequisites
 
 - Windows Server with PowerShell 5.1+
-- Access to SQL Server database
+- Network access to SQL Server
 - Network access to Cloudflare API
 
-## Setup
+## Quick Start
 
-### 1. Configure the sync
+### 1. Configure
 
-Copy the example configuration and edit:
+Copy and edit the configuration:
 
 ```powershell
 Copy-Item config.example.json config.json
 notepad config.json
 ```
 
-Update these settings:
-- `sqlServer.server` - Your SQL Server hostname
-- `sqlServer.database` - Database name
-- `cloudflare.apiUrl` - Your deployed Worker URL
-- `cloudflare.syncApiKey` - Secret key (set in Cloudflare Workers)
+### 2. Discover Tables
 
-### 2. Configure tables to sync
+See what tables will be synced:
 
-Edit the `tables` array in `config.json`:
+```powershell
+.\SyncService.ps1 -DiscoverOnly
+```
+
+### 3. Run Sync
+
+```powershell
+# Dry run (no uploads)
+.\SyncService.ps1 -DryRun
+
+# Full sync
+.\SyncService.ps1
+
+# Specific database only
+.\SyncService.ps1 -DatabaseName Logos
+
+# Skip embedding generation (faster initial load)
+.\SyncService.ps1 -SkipEmbeddings
+```
+
+### 4. Schedule Nightly Sync
+
+```powershell
+.\Install-ScheduledTask.ps1
+```
+
+## Configuration
+
+### Multiple Databases
+
+The config supports multiple databases:
 
 ```json
 {
-  "tables": [
+  "databases": [
     {
-      "source": "dbo.YourTable",
-      "target": "your_table",
-      "columns": [
-        { "source": "ID", "target": "id", "primaryKey": true },
-        { "source": "Description", "target": "description", "embed": true },
-        { "source": "SSN", "skip": true }
-      ],
-      "modifiedColumn": "LastModified",
-      "embedFields": ["description"]
+      "name": "Logos",
+      "enabled": true,
+      "sqlServer": { ... }
+    },
+    {
+      "name": "AnotherDB",
+      "enabled": false,
+      "sqlServer": { ... }
     }
   ]
 }
 ```
 
-Column options:
-- `primaryKey` - Use as the unique identifier
-- `embed` - Include in text for AI embeddings
-- `skip` - Don't sync this column
-- `sanitize` - Apply sanitization rule:
-  - `mask_name` - "John Smith" → "J*** S****"
-  - `mask_ssn` - "123-45-6789" → "***-**-6789"
-  - `mask_phone` - "(555) 123-4567" → "(***) ***-4567"
-  - `redact` - Replace with "[REDACTED]"
+### Schema Filtering
 
-### 3. Test the sync
+Exclude schemas or specific tables:
 
-Run manually first:
-
-```powershell
-# Dry run (no actual uploads)
-.\SyncService.ps1 -DryRun
-
-# Test with real upload
-.\SyncService.ps1
-
-# Full sync (ignore last sync time)
-.\SyncService.ps1 -FullSync
+```json
+"discovery": {
+  "excludeSchemas": ["sys", "INFORMATION_SCHEMA", "audit"],
+  "excludeTables": ["LargeLogTable", "TempData"],
+  "fullSyncTables": ["Employees", "Vendors"]
+}
 ```
 
-### 4. Install scheduled task
+### Sanitization
 
-```powershell
-# Run as Administrator
-.\Install-ScheduledTask.ps1
+Automatically skip or mask sensitive data:
 
-# Custom time (default is 2 AM)
-.\Install-ScheduledTask.ps1 -Time "03:30"
-
-# Different user account
-.\Install-ScheduledTask.ps1 -User "DOMAIN\ServiceAccount"
+```json
+"sanitization": {
+  "rules": [
+    { "columnPattern": "SSN", "action": "skip" },
+    { "columnPattern": "Password", "action": "skip" }
+  ],
+  "maskPatterns": [
+    { "columnPattern": "Email", "action": "mask_email" },
+    { "columnPattern": "Phone", "action": "mask_phone" }
+  ]
+}
 ```
+
+## R2 Storage Structure
+
+```
+askmesc-storage/
+└── databases/
+    └── Logos/
+        ├── _meta.json
+        └── tables/
+            ├── dbo_Employees/
+            │   ├── _meta.json
+            │   ├── data_0001.json (10,000 rows)
+            │   ├── data_0002.json
+            │   └── ...
+            └── dbo_Permits/
+                └── ...
+```
+
+## Sync Strategies
+
+| Table Type | Strategy | Example |
+|------------|----------|---------|
+| Reference tables | Full sync (all rows) | Employees, Vendors |
+| Tables with dates | Last N years | Transactions, Orders |
+| Other tables | All rows | Everything else |
 
 ## Monitoring
 
-Logs are stored in the `logs` folder (configurable in `config.json`).
+View logs:
 
-View recent logs:
 ```powershell
-Get-Content .\logs\sync_$(Get-Date -Format 'yyyy-MM-dd').log -Tail 50
+Get-Content .\logs\sync_$(Get-Date -Format 'yyyy-MM-dd').log -Tail 100
 ```
 
-Check task status:
+Check sync status via API:
+
 ```powershell
-Get-ScheduledTask -TaskName "AskMeSC-DataSync" | Select-Object State, LastRunTime, LastTaskResult
+Invoke-RestMethod "https://askmesc-api.sclg.workers.dev/api/sync/status" -Headers @{"X-Sync-API-Key"="YOUR_KEY"}
 ```
 
 ## Troubleshooting
 
-### Connection issues
+### Test SQL Connection
 
-Test SQL Server connectivity:
 ```powershell
 $conn = New-Object System.Data.SqlClient.SqlConnection
-$conn.ConnectionString = "Server=YOUR_SERVER;Database=YOUR_DB;Integrated Security=True"
+$conn.ConnectionString = "Server=DS6;Database=Logos;User Id=AskMeSC;Password=xxx"
 $conn.Open()
 $conn.Close()
+Write-Host "Connection successful"
 ```
 
-### API issues
+### Test Cloudflare API
 
-Test Cloudflare API:
 ```powershell
 $headers = @{ "X-Sync-API-Key" = "YOUR_KEY" }
-Invoke-RestMethod -Uri "https://your-api.workers.dev/api/health" -Headers $headers
+Invoke-RestMethod "https://askmesc-api.sclg.workers.dev/api/health" -Headers $headers
 ```
 
-## Security Notes
+## Performance Tips
 
-- The `config.json` file contains sensitive credentials - do not commit to git
-- Use Windows Integrated Security where possible
-- Store the Cloudflare sync API key securely
-- Review sanitization rules for PII before first sync
+1. **Initial load**: Run with `-SkipEmbeddings` first, then run again to generate embeddings
+2. **Large databases**: Run during off-hours
+3. **Parallel uploads**: Adjust `r2.parallelUploads` in config (default: 4)
+4. **Chunk size**: Adjust `r2.chunkSize` (default: 10,000 rows per file)
