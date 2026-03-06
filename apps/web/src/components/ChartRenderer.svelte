@@ -1,13 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { Chart, registerables } from 'chart.js';
+  import { browser } from '$app/environment';
   import type { ChartData } from '$lib/types';
-
-  Chart.register(...registerables);
 
   let { data }: { data: ChartData } = $props();
   let canvas: HTMLCanvasElement;
-  let chart: Chart | null = null;
+  let chart: any = null;
+  let mounted = $state(false);
 
   const colors = [
     'rgba(79, 70, 229, 0.8)',
@@ -22,8 +21,13 @@
 
   const borderColors = colors.map(c => c.replace('0.8', '1'));
 
-  onMount(() => {
-    createChart();
+  onMount(async () => {
+    mounted = true;
+    if (browser) {
+      const { Chart, registerables } = await import('chart.js');
+      Chart.register(...registerables);
+      createChart(Chart);
+    }
   });
 
   onDestroy(() => {
@@ -32,7 +36,9 @@
     }
   });
 
-  function createChart() {
+  function createChart(Chart: any) {
+    if (!canvas || !data) return;
+    
     if (chart) {
       chart.destroy();
     }
@@ -84,17 +90,13 @@
       },
     });
   }
-
-  $effect(() => {
-    if (canvas && data) {
-      createChart();
-    }
-  });
 </script>
 
+{#if mounted}
 <div class="chart-container">
   <canvas bind:this={canvas}></canvas>
 </div>
+{/if}
 
 <style>
   .chart-container {
