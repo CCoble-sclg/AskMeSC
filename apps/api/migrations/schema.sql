@@ -1,25 +1,40 @@
--- AskMeSC Database Schema
+-- AskMeSC Database Schema (Index-Only)
+-- D1 is used for lightweight indexing; full data is stored in R2
 -- Run with: npm run db:migrate
 
--- Main table for synced records
-CREATE TABLE IF NOT EXISTS sync_records (
-    id TEXT PRIMARY KEY,
-    table_name TEXT NOT NULL,
-    content TEXT NOT NULL,
-    metadata TEXT, -- JSON string
+-- Table index - tracks synced tables
+CREATE TABLE IF NOT EXISTS table_index (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    database_name TEXT NOT NULL,
+    table_key TEXT NOT NULL,
+    schema_name TEXT,
+    table_name TEXT,
+    row_count INTEGER DEFAULT 0,
+    chunk_count INTEGER DEFAULT 0,
+    embedding_count INTEGER DEFAULT 0,
+    last_sync DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    UNIQUE(database_name, table_key)
 );
 
--- Index for faster lookups by table
-CREATE INDEX IF NOT EXISTS idx_sync_records_table ON sync_records(table_name);
+CREATE INDEX IF NOT EXISTS idx_table_index_db ON table_index(database_name);
 
--- Index for timestamp-based queries
-CREATE INDEX IF NOT EXISTS idx_sync_records_updated ON sync_records(updated_at);
+-- Database registry
+CREATE TABLE IF NOT EXISTS database_registry (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    server TEXT,
+    description TEXT,
+    table_count INTEGER DEFAULT 0,
+    total_rows INTEGER DEFAULT 0,
+    last_sync DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 
--- Conversation history (optional, for context)
+-- Conversation history (for context in multi-turn chats)
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
+    title TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -27,20 +42,28 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL,
-    role TEXT NOT NULL, -- 'user' or 'assistant'
+    role TEXT NOT NULL,
     content TEXT NOT NULL,
-    sources TEXT, -- JSON array of source references
+    sources TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
 
--- Sync metadata for tracking
-CREATE TABLE IF NOT EXISTS sync_status (
-    id INTEGER PRIMARY KEY,
-    table_name TEXT UNIQUE NOT NULL,
-    last_sync_at DATETIME,
-    records_synced INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'pending'
+-- Sync log for tracking sync operations
+CREATE TABLE IF NOT EXISTS sync_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    database_name TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    tables_processed INTEGER DEFAULT 0,
+    rows_processed INTEGER DEFAULT 0,
+    duration_seconds REAL,
+    status TEXT DEFAULT 'running',
+    error_message TEXT,
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME
 );
+
+CREATE INDEX IF NOT EXISTS idx_sync_log_db ON sync_log(database_name);
+CREATE INDEX IF NOT EXISTS idx_sync_log_started ON sync_log(started_at);

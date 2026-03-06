@@ -1,7 +1,13 @@
 import type { Env, EmbeddingChunk } from '../types';
 
-const CHUNK_SIZE = 500; // Characters per chunk
-const CHUNK_OVERLAP = 50; // Overlap between chunks
+const CHUNK_SIZE = 500;
+const CHUNK_OVERLAP = 50;
+
+const TEXT_FIELD_PATTERNS = [
+  'description', 'notes', 'comments', 'remarks', 'details',
+  'summary', 'name', 'title', 'address', 'memo', 'text',
+  'content', 'body', 'message', 'subject'
+];
 
 export class EmbeddingService {
   private env: Env;
@@ -26,18 +32,40 @@ export class EmbeddingService {
   }
 
   /**
+   * Build text content from a record for embedding
+   */
+  buildTextContent(record: Record<string, any>): string {
+    const parts: string[] = [];
+
+    for (const [key, value] of Object.entries(record)) {
+      if (key.startsWith('_')) continue;
+      if (value === null || value === undefined) continue;
+      
+      const strValue = String(value).trim();
+      if (strValue.length < 10) continue;
+
+      const keyLower = key.toLowerCase();
+      const isTextField = TEXT_FIELD_PATTERNS.some(pattern => 
+        keyLower.includes(pattern)
+      );
+
+      if (isTextField) {
+        parts.push(`${key}: ${strValue}`);
+      }
+    }
+
+    return parts.join('\n');
+  }
+
+  /**
    * Split text into overlapping chunks for embedding
    */
   chunkText(text: string, recordId: string, table: string): EmbeddingChunk[] {
     const chunks: EmbeddingChunk[] = [];
     
-    // Clean and normalize text
-    const cleanText = text
-      .replace(/\s+/g, ' ')
-      .trim();
+    const cleanText = text.replace(/\s+/g, ' ').trim();
 
     if (cleanText.length <= CHUNK_SIZE) {
-      // Small text, single chunk
       chunks.push({
         id: `${table}-${recordId}-0`,
         text: cleanText,
@@ -48,7 +76,6 @@ export class EmbeddingService {
         },
       });
     } else {
-      // Split into overlapping chunks
       let start = 0;
       let chunkIndex = 0;
 
@@ -56,7 +83,6 @@ export class EmbeddingService {
         const end = Math.min(start + CHUNK_SIZE, cleanText.length);
         let chunkText = cleanText.slice(start, end);
 
-        // Try to break at sentence boundary
         if (end < cleanText.length) {
           const lastPeriod = chunkText.lastIndexOf('. ');
           const lastNewline = chunkText.lastIndexOf('\n');
@@ -77,15 +103,10 @@ export class EmbeddingService {
           },
         });
 
-        // Move start position with overlap
-        start += chunkText.length - CHUNK_OVERLAP;
-        if (start <= chunks[chunks.length - 1].text.length - CHUNK_OVERLAP) {
-          start = chunks[chunks.length - 1].text.length + start;
-        }
+        start += Math.max(chunkText.length - CHUNK_OVERLAP, 1);
         chunkIndex++;
 
-        // Safety check to prevent infinite loops
-        if (chunkIndex > 1000) break;
+        if (chunkIndex > 100) break;
       }
     }
 
@@ -93,9 +114,12 @@ export class EmbeddingService {
   }
 
   /**
-   * Store a chunk's embedding in Vectorize
+   * Store a chunk's embedding in Vectorize with R2 reference
    */
-  async storeEmbedding(chunk: EmbeddingChunk): Promise<void> {
+  async storeEmbedding(
+    chunk: EmbeddingChunk,
+    r2Info?: { database: string; r2Key: string }
+  ): Promise<void> {
     const embedding = await this.generateEmbedding(chunk.text);
 
     await this.env.VECTORS.upsert([
@@ -105,18 +129,46 @@ export class EmbeddingService {
         metadata: {
           ...chunk.metadata,
           textPreview: chunk.text.substring(0, 100),
+          database: r2Info?.database,
+          r2Key: r2Info?.r2Key,
         },
       },
     ]);
   }
 
   /**
-   * Delete embeddings for a record
+   * Search for similar chunks
    */
-  async deleteEmbeddings(table: string, recordId: string): Promise<void> {
-    // Vectorize doesn't support querying by metadata for deletion,
-    // so we'd need to track chunk IDs in D1 for cleanup
-    // For now, old embeddings will be overwritten on re-sync
-    console.log(`Would delete embeddings for ${table}/${recordId}`);
+  async searchSimilar(
+    text: string,
+    topK: number = 10,
+    filter?: { database?: string; table?: string }
+  ): Promise<Array<{
+    id: string;
+    score: number;
+    metadata: Record<string, unknown>;
+  }>> {
+    const embedding = await this.generateEmbedding(text);
+
+    const results = await this.env.VECTORS.query(embedding, {
+      topK,
+      returnMetadata: 'all',
+      filter: filter as any,
+    });
+
+    return results.matches.map(match => ({
+      id: match.id,
+      score: match.score || 0,
+      metadata: (match.metadata || {}) as Record<string, unknown>,
+    }));
+  }
+
+  /**
+   * Delete embeddings by prefix
+   */
+  async deleteByPrefix(prefix: string): Promise<void> {
+    // Vectorize doesn't support prefix deletion directly
+    // Would need to track IDs in D1 for cleanup
+    console.log(`Would delete embeddings with prefix: ${prefix}`);
   }
 }

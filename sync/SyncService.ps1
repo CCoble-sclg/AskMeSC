@@ -1,19 +1,19 @@
 <#
 .SYNOPSIS
-    AskMeSC Data Sync Service - Syncs SQL Server data to Cloudflare D1/Vectorize
+    AskMeSC Data Sync Service - Syncs SQL Server data to Cloudflare R2/Vectorize
 
 .DESCRIPTION
-    This script connects to your SQL Server database, automatically discovers tables,
-    extracts and sanitizes data, and uploads it to Cloudflare for the AI chatbot to query.
+    This script connects to SQL Server databases, exports data to JSON chunks,
+    uploads to R2 storage, and generates embeddings for AI search.
 
 .EXAMPLE
     .\SyncService.ps1 -ConfigPath .\config.json
 
 .EXAMPLE
-    .\SyncService.ps1 -ConfigPath .\config.json -FullSync
+    .\SyncService.ps1 -DiscoverOnly  # List tables without syncing
 
 .EXAMPLE
-    .\SyncService.ps1 -DiscoverOnly  # Just list tables that would be synced
+    .\SyncService.ps1 -DatabaseName Logos  # Sync only specific database
 #>
 
 [CmdletBinding()]
@@ -22,24 +22,37 @@ param(
     [string]$ConfigPath = ".\config.json",
     
     [Parameter(Mandatory = $false)]
+    [string]$DatabaseName = "",
+    
+    [Parameter(Mandatory = $false)]
     [switch]$FullSync,
     
     [Parameter(Mandatory = $false)]
     [switch]$DryRun,
     
     [Parameter(Mandatory = $false)]
-    [switch]$DiscoverOnly
+    [switch]$DiscoverOnly,
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipEmbeddings
 )
 
 $ErrorActionPreference = "Stop"
 $script:StartTime = Get-Date
+$script:Stats = @{
+    TablesProcessed = 0
+    RowsExported = 0
+    ChunksUploaded = 0
+    EmbeddingsGenerated = 0
+    Errors = @()
+}
 
 #region Logging
 
 function Write-Log {
     param(
         [string]$Message,
-        [ValidateSet("Info", "Warning", "Error", "Debug")]
+        [ValidateSet("Info", "Warning", "Error", "Debug", "Success")]
         [string]$Level = "Info"
     )
     
@@ -50,11 +63,16 @@ function Write-Log {
         "Error"   { Write-Host $logMessage -ForegroundColor Red }
         "Warning" { Write-Host $logMessage -ForegroundColor Yellow }
         "Debug"   { if ($script:Config.logging.logLevel -eq "Debug") { Write-Host $logMessage -ForegroundColor Gray } }
+        "Success" { Write-Host $logMessage -ForegroundColor Green }
         default   { Write-Host $logMessage }
     }
     
-    if ($script:Config.logging.logPath) {
-        $logFile = Join-Path $script:Config.logging.logPath "sync_$(Get-Date -Format 'yyyy-MM-dd').log"
+    if ($script:Config -and $script:Config.logging.logPath) {
+        $logDir = $script:Config.logging.logPath
+        if (-not (Test-Path $logDir)) {
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        }
+        $logFile = Join-Path $logDir "sync_$(Get-Date -Format 'yyyy-MM-dd').log"
         Add-Content -Path $logFile -Value $logMessage -ErrorAction SilentlyContinue
     }
 }
@@ -72,9 +90,9 @@ function Load-Configuration {
     
     $config = Get-Content $Path -Raw | ConvertFrom-Json
     
-    # Ensure log directory exists
-    if ($config.logging.logPath -and -not (Test-Path $config.logging.logPath)) {
-        New-Item -ItemType Directory -Path $config.logging.logPath -Force | Out-Null
+    # Ensure export directory exists
+    if ($config.sync.exportPath -and -not (Test-Path $config.sync.exportPath)) {
+        New-Item -ItemType Directory -Path $config.sync.exportPath -Force | Out-Null
     }
     
     return $config
@@ -85,14 +103,14 @@ function Load-Configuration {
 #region SQL Server
 
 function Connect-SqlServer {
-    param($Config)
+    param($SqlConfig)
     
-    $connectionString = "Server=$($Config.server);Database=$($Config.database);"
+    $connectionString = "Server=$($SqlConfig.server);Database=$($SqlConfig.database);"
     
-    if ($Config.integratedSecurity) {
+    if ($SqlConfig.integratedSecurity) {
         $connectionString += "Integrated Security=True;"
     } else {
-        $connectionString += "User Id=$($Config.username);Password=$($Config.password);"
+        $connectionString += "User Id=$($SqlConfig.username);Password=$($SqlConfig.password);"
     }
     
     $connection = New-Object System.Data.SqlClient.SqlConnection($connectionString)
@@ -103,8 +121,6 @@ function Connect-SqlServer {
 
 function Discover-Tables {
     param($Connection, $DiscoveryConfig)
-    
-    Write-Log "Discovering tables..." -Level Info
     
     $query = @"
 SELECT 
@@ -133,16 +149,14 @@ ORDER BY s.name, t.name
         
         # Check exclusions
         if ($DiscoveryConfig.excludeSchemas -contains $schemaName) {
-            Write-Log "  Excluding $fullName (schema excluded)" -Level Debug
             continue
         }
         
         if ($DiscoveryConfig.excludeTables -contains $fullName -or $DiscoveryConfig.excludeTables -contains $tableName) {
-            Write-Log "  Excluding $fullName (table excluded)" -Level Debug
             continue
         }
         
-        # Check inclusions (if specified, only include these)
+        # Check inclusions
         if ($DiscoveryConfig.includeSchemas -and $DiscoveryConfig.includeSchemas.Count -gt 0) {
             if ($DiscoveryConfig.includeSchemas -notcontains $schemaName) {
                 continue
@@ -159,11 +173,10 @@ ORDER BY s.name, t.name
             Schema = $schemaName
             Table = $tableName
             FullName = $fullName
-            RowCount = $table.TableRowCount
+            RowCount = [int64]$table.TableRowCount
         }
     }
     
-    Write-Log "Found $($filteredTables.Count) tables to sync" -Level Info
     return $filteredTables
 }
 
@@ -197,142 +210,6 @@ ORDER BY c.column_id
     return $columns
 }
 
-function Get-TableData {
-    param(
-        $Connection,
-        $SchemaName,
-        $TableName,
-        $Columns,
-        [int]$MaxRecords,
-        $DiscoveryConfig
-    )
-    
-    # Build column list, excluding binary types
-    $selectColumns = @()
-    $dateColumn = $null
-    
-    foreach ($col in $Columns.Rows) {
-        $dataType = $col.DataType.ToLower()
-        if ($dataType -in @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')) {
-            continue
-        }
-        $selectColumns += "[$($col.ColumnName)]"
-        
-        # Check if this is a date column we can filter on
-        if ($null -eq $dateColumn -and $DiscoveryConfig.dateColumnNames) {
-            foreach ($dateName in $DiscoveryConfig.dateColumnNames) {
-                if ($col.ColumnName -eq $dateName -or $col.ColumnName -like "*$dateName*") {
-                    if ($dataType -in @('datetime', 'datetime2', 'date', 'smalldatetime')) {
-                        $dateColumn = $col.ColumnName
-                        break
-                    }
-                }
-            }
-        }
-    }
-    
-    if ($selectColumns.Count -eq 0) {
-        return $null
-    }
-    
-    $columnList = $selectColumns -join ", "
-    
-    # Determine sync strategy
-    $isFullSyncTable = $false
-    if ($DiscoveryConfig.fullSyncTables) {
-        foreach ($fst in $DiscoveryConfig.fullSyncTables) {
-            if ($TableName -eq $fst -or $TableName -like "*$fst*") {
-                $isFullSyncTable = $true
-                break
-            }
-        }
-    }
-    
-    # Build query based on strategy
-    if ($isFullSyncTable) {
-        # Full sync - no limit
-        $query = "SELECT $columnList FROM [$SchemaName].[$TableName]"
-        Write-Log "  Strategy: Full sync (reference table)" -Level Info
-    }
-    elseif ($dateColumn -and $DiscoveryConfig.dateFilterYears) {
-        # Date filter
-        $yearsBack = $DiscoveryConfig.dateFilterYears
-        $query = "SELECT $columnList FROM [$SchemaName].[$TableName] WHERE [$dateColumn] >= DATEADD(year, -$yearsBack, GETDATE()) ORDER BY [$dateColumn] DESC"
-        Write-Log "  Strategy: Date filter on [$dateColumn] (last $yearsBack years)" -Level Info
-    }
-    else {
-        # Default - use TOP limit
-        $query = "SELECT TOP $MaxRecords $columnList FROM [$SchemaName].[$TableName]"
-        Write-Log "  Strategy: TOP $MaxRecords rows" -Level Info
-    }
-    
-    Write-Log "  Query: $query" -Level Debug
-    
-    $command = New-Object System.Data.SqlClient.SqlCommand($query, $Connection)
-    $command.CommandTimeout = 300  # 5 minute timeout
-    
-    $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
-    $dataTable = New-Object System.Data.DataTable
-    $adapter.Fill($dataTable) | Out-Null
-    
-    return $dataTable
-}
-
-#endregion
-
-#region Data Transformation
-
-function Should-SkipColumn {
-    param($ColumnName, $SanitizationRules)
-    
-    foreach ($rule in $SanitizationRules) {
-        if ($ColumnName -like "*$($rule.columnPattern)*" -and $rule.action -eq "skip") {
-            return $true
-        }
-    }
-    return $false
-}
-
-function Sanitize-Value {
-    param(
-        [string]$Value,
-        [string]$ColumnName,
-        $MaskPatterns
-    )
-    
-    if ([string]::IsNullOrEmpty($Value)) { return $Value }
-    
-    foreach ($pattern in $MaskPatterns) {
-        if ($ColumnName -like "*$($pattern.columnPattern)*") {
-            switch ($pattern.action) {
-                "mask_email" {
-                    if ($Value -match "^(.)[^@]*(@.*)$") {
-                        return $Matches[1] + "****" + $Matches[2]
-                    }
-                }
-                "mask_phone" {
-                    $digits = $Value -replace "[^\d]", ""
-                    if ($digits.Length -ge 4) {
-                        return "(***) ***-" + $digits.Substring($digits.Length - 4)
-                    }
-                }
-                "mask_name" {
-                    $parts = $Value -split " "
-                    $masked = $parts | ForEach-Object {
-                        if ($_.Length -gt 1) { $_.Substring(0, 1) + ("*" * ($_.Length - 1)) } else { $_ }
-                    }
-                    return $masked -join " "
-                }
-                "redact" {
-                    return "[REDACTED]"
-                }
-            }
-        }
-    }
-    
-    return $Value
-}
-
 function Get-PrimaryKeyColumn {
     param($Columns)
     
@@ -342,7 +219,6 @@ function Get-PrimaryKeyColumn {
         }
     }
     
-    # Fallback: look for common ID column names
     foreach ($col in $Columns.Rows) {
         if ($col.ColumnName -in @('Id', 'ID', 'id', 'Key', 'PK')) {
             return $col.ColumnName
@@ -352,7 +228,6 @@ function Get-PrimaryKeyColumn {
         }
     }
     
-    # Last resort: use first column
     if ($Columns.Rows.Count -gt 0) {
         return $Columns.Rows[0].ColumnName
     }
@@ -360,182 +235,351 @@ function Get-PrimaryKeyColumn {
     return $null
 }
 
-function Should-EmbedColumn {
-    param($ColumnName, $DataType, $EmbeddingConfig)
-    
-    # Only embed text-like columns
-    $textTypes = @('varchar', 'nvarchar', 'char', 'nchar', 'text', 'ntext')
-    if ($DataType.ToLower() -notin $textTypes) {
-        return $false
-    }
-    
-    foreach ($pattern in $EmbeddingConfig.textColumnPatterns) {
-        if ($ColumnName -like "*$pattern*") {
-            return $true
-        }
-    }
-    
-    return $false
-}
-
-function Transform-Record {
+function Export-TableToChunks {
     param(
-        $Row,
+        $Connection,
+        $SchemaName,
+        $TableName,
         $Columns,
-        $TableFullName,
-        $PrimaryKeyColumn,
-        $Config
+        $DbConfig,
+        $ChunkSize,
+        $ExportPath
     )
     
-    $record = @{
-        id = $null
-        table = $TableFullName -replace '\.', '_'
-        content = ""
-        metadata = @{}
-    }
-    
-    $contentParts = @()
+    # Build column list
+    $selectColumns = @()
+    $binaryColumns = @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')
     
     foreach ($col in $Columns.Rows) {
-        $colName = $col.ColumnName
-        $dataType = $col.DataType
-        
-        # Skip binary types
-        if ($dataType.ToLower() -in @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')) {
+        $dataType = $col.DataType.ToLower()
+        if ($dataType -in $binaryColumns) {
             continue
         }
-        
-        # Skip sensitive columns
-        if (Should-SkipColumn -ColumnName $colName -SanitizationRules $Config.sanitization.rules) {
-            continue
-        }
-        
-        $value = $Row.$colName
-        
-        # Handle null/DBNull
-        if ($null -eq $value -or $value -is [DBNull]) {
-            $value = ""
-        } else {
-            $value = $value.ToString()
-        }
-        
-        # Apply masking
-        $value = Sanitize-Value -Value $value -ColumnName $colName -MaskPatterns $Config.sanitization.maskPatterns
-        
-        # Set primary key
-        if ($colName -eq $PrimaryKeyColumn) {
-            $record.id = $value
-        }
-        
-        # Build content for embedding
-        if (Should-EmbedColumn -ColumnName $colName -DataType $dataType -EmbeddingConfig $Config.embedding) {
-            if (-not [string]::IsNullOrWhiteSpace($value) -and $value.Length -ge $Config.embedding.minTextLength) {
-                $contentParts += "$colName`: $value"
+        $selectColumns += "[$($col.ColumnName)]"
+    }
+    
+    if ($selectColumns.Count -eq 0) {
+        return @()
+    }
+    
+    $columnList = $selectColumns -join ", "
+    $fullName = "$SchemaName.$TableName"
+    $tableKey = $fullName -replace '\.', '_'
+    
+    # Create export directory for this table
+    $tableExportPath = Join-Path $ExportPath $tableKey
+    if (-not (Test-Path $tableExportPath)) {
+        New-Item -ItemType Directory -Path $tableExportPath -Force | Out-Null
+    }
+    
+    # Determine query strategy
+    $dateColumn = $null
+    foreach ($col in $Columns.Rows) {
+        if ($DbConfig.discovery.dateColumnNames) {
+            foreach ($dateName in $DbConfig.discovery.dateColumnNames) {
+                if ($col.ColumnName -eq $dateName -or $col.ColumnName -like "*$dateName*") {
+                    $dataType = $col.DataType.ToLower()
+                    if ($dataType -in @('datetime', 'datetime2', 'date', 'smalldatetime')) {
+                        $dateColumn = $col.ColumnName
+                        break
+                    }
+                }
             }
         }
-        
-        # Add to metadata (truncate very long values)
-        if ($value.Length -gt 1000) {
-            $record.metadata[$colName] = $value.Substring(0, 1000) + "..."
-        } else {
-            $record.metadata[$colName] = $value
+        if ($dateColumn) { break }
+    }
+    
+    # Check if full sync table
+    $isFullSyncTable = $false
+    if ($DbConfig.discovery.fullSyncTables) {
+        foreach ($fst in $DbConfig.discovery.fullSyncTables) {
+            if ($TableName -eq $fst -or $TableName -like "*$fst*") {
+                $isFullSyncTable = $true
+                break
+            }
         }
     }
     
-    $record.content = $contentParts -join "`n"
-    
-    # Generate ID if none found
-    if (-not $record.id) {
-        $record.id = [guid]::NewGuid().ToString()
+    # Build query
+    if ($isFullSyncTable -or -not $dateColumn) {
+        $query = "SELECT $columnList FROM [$SchemaName].[$TableName]"
+        $strategy = if ($isFullSyncTable) { "Full sync (reference table)" } else { "Full table scan" }
+    } else {
+        $yearsBack = $DbConfig.discovery.dateFilterYears
+        $query = "SELECT $columnList FROM [$SchemaName].[$TableName] WHERE [$dateColumn] >= DATEADD(year, -$yearsBack, GETDATE())"
+        $strategy = "Date filter (last $yearsBack years)"
     }
     
-    return $record
+    Write-Log "    Strategy: $strategy" -Level Debug
+    
+    # Execute query
+    $command = New-Object System.Data.SqlClient.SqlCommand($query, $Connection)
+    $command.CommandTimeout = 600  # 10 minute timeout
+    
+    $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
+    $dataTable = New-Object System.Data.DataTable
+    
+    try {
+        $adapter.Fill($dataTable) | Out-Null
+    }
+    catch {
+        Write-Log "    Error querying table: $_" -Level Error
+        return @()
+    }
+    
+    if ($dataTable.Rows.Count -eq 0) {
+        Write-Log "    No rows to export" -Level Info
+        return @()
+    }
+    
+    Write-Log "    Retrieved $($dataTable.Rows.Count) rows" -Level Info
+    
+    # Get primary key column
+    $pkColumn = Get-PrimaryKeyColumn -Columns $Columns
+    
+    # Export in chunks
+    $chunks = @()
+    $totalRows = $dataTable.Rows.Count
+    $chunkIndex = 1
+    $rowIndex = 0
+    
+    while ($rowIndex -lt $totalRows) {
+        $chunkRows = @()
+        $endIndex = [Math]::Min($rowIndex + $ChunkSize - 1, $totalRows - 1)
+        
+        for ($i = $rowIndex; $i -le $endIndex; $i++) {
+            $row = $dataTable.Rows[$i]
+            $record = @{}
+            
+            foreach ($col in $Columns.Rows) {
+                $colName = $col.ColumnName
+                $dataType = $col.DataType.ToLower()
+                
+                if ($dataType -in $binaryColumns) {
+                    continue
+                }
+                
+                # Check if should skip (sanitization)
+                $shouldSkip = $false
+                foreach ($rule in $DbConfig.sanitization.rules) {
+                    if ($colName -like "*$($rule.columnPattern)*" -and $rule.action -eq "skip") {
+                        $shouldSkip = $true
+                        break
+                    }
+                }
+                if ($shouldSkip) { continue }
+                
+                $value = $row.$colName
+                
+                if ($null -eq $value -or $value -is [DBNull]) {
+                    $record[$colName] = $null
+                } else {
+                    $strValue = $value.ToString()
+                    
+                    # Apply masking
+                    foreach ($pattern in $DbConfig.sanitization.maskPatterns) {
+                        if ($colName -like "*$($pattern.columnPattern)*") {
+                            switch ($pattern.action) {
+                                "mask_email" {
+                                    if ($strValue -match "^(.)[^@]*(@.*)$") {
+                                        $strValue = $Matches[1] + "****" + $Matches[2]
+                                    }
+                                }
+                                "mask_phone" {
+                                    $digits = $strValue -replace "[^\d]", ""
+                                    if ($digits.Length -ge 4) {
+                                        $strValue = "(***) ***-" + $digits.Substring($digits.Length - 4)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    $record[$colName] = $strValue
+                }
+            }
+            
+            # Add primary key as _id
+            if ($pkColumn -and $record[$pkColumn]) {
+                $record["_id"] = $record[$pkColumn].ToString()
+            } else {
+                $record["_id"] = [guid]::NewGuid().ToString()
+            }
+            
+            $chunkRows += $record
+        }
+        
+        # Write chunk to file
+        $chunkFileName = "data_{0:D4}.json" -f $chunkIndex
+        $chunkFilePath = Join-Path $tableExportPath $chunkFileName
+        
+        $chunkData = @{
+            database = $DbConfig.name
+            table = $fullName
+            tableKey = $tableKey
+            chunkIndex = $chunkIndex
+            rowCount = $chunkRows.Count
+            rows = $chunkRows
+        }
+        
+        if ($script:Config.r2.compressJson) {
+            $chunkData | ConvertTo-Json -Depth 10 -Compress | Set-Content -Path $chunkFilePath -Encoding UTF8
+        } else {
+            $chunkData | ConvertTo-Json -Depth 10 | Set-Content -Path $chunkFilePath -Encoding UTF8
+        }
+        
+        $chunks += @{
+            FilePath = $chunkFilePath
+            FileName = $chunkFileName
+            ChunkIndex = $chunkIndex
+            RowCount = $chunkRows.Count
+            R2Key = "databases/$($DbConfig.name)/tables/$tableKey/$chunkFileName"
+        }
+        
+        $script:Stats.RowsExported += $chunkRows.Count
+        $rowIndex = $endIndex + 1
+        $chunkIndex++
+    }
+    
+    Write-Log "    Exported to $($chunks.Count) chunk(s)" -Level Info
+    
+    # Write table metadata
+    $metaFilePath = Join-Path $tableExportPath "_meta.json"
+    $metaData = @{
+        database = $DbConfig.name
+        schema = $SchemaName
+        table = $TableName
+        fullName = $fullName
+        tableKey = $tableKey
+        totalRows = $totalRows
+        chunkCount = $chunks.Count
+        primaryKey = $pkColumn
+        columns = @($Columns.Rows | ForEach-Object { @{ name = $_.ColumnName; type = $_.DataType } })
+        exportedAt = (Get-Date).ToString("o")
+    }
+    $metaData | ConvertTo-Json -Depth 5 | Set-Content -Path $metaFilePath -Encoding UTF8
+    
+    return $chunks
 }
 
 #endregion
 
-#region Cloudflare API
+#region Cloudflare R2 Upload
 
-function Send-ToCloudflare {
+function Upload-ChunkToR2 {
     param(
-        $Records,
-        $TableName,
-        $Config
+        $ChunkInfo,
+        $CloudflareConfig
     )
     
-    $uri = "$($Config.cloudflare.apiUrl)/api/sync/upload"
+    $uri = "$($CloudflareConfig.apiUrl)/api/sync/r2/upload"
+    
+    $fileContent = Get-Content -Path $ChunkInfo.FilePath -Raw -Encoding UTF8
     
     $body = @{
-        table = $TableName
-        records = $Records
-    } | ConvertTo-Json -Depth 10 -Compress
+        key = $ChunkInfo.R2Key
+        content = $fileContent
+        contentType = "application/json"
+    } | ConvertTo-Json -Depth 5 -Compress
     
     $headers = @{
         "Content-Type" = "application/json"
-        "X-Sync-API-Key" = $Config.cloudflare.syncApiKey
+        "X-Sync-API-Key" = $CloudflareConfig.syncApiKey
     }
     
     if ($script:DryRun) {
-        Write-Log "DRY RUN: Would upload $($Records.Count) records to $TableName" -Level Info
-        return @{ success = $true; inserted = $Records.Count; embedded = 0 }
+        Write-Log "      DRY RUN: Would upload $($ChunkInfo.R2Key)" -Level Debug
+        return $true
     }
     
     $attempt = 1
-    $maxAttempts = $Config.sync.retryAttempts
+    $maxAttempts = $script:Config.sync.retryAttempts
     
     while ($attempt -le $maxAttempts) {
         try {
             $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -TimeoutSec 120
-            return $response
+            return $true
         }
         catch {
-            Write-Log "Upload attempt $attempt failed: $_" -Level Warning
-            
+            Write-Log "      Upload attempt $attempt failed: $_" -Level Warning
             if ($attempt -lt $maxAttempts) {
-                Start-Sleep -Milliseconds $Config.sync.retryDelayMs
+                Start-Sleep -Milliseconds $script:Config.sync.retryDelayMs
                 $attempt++
             } else {
-                throw "Failed to upload after $maxAttempts attempts: $_"
+                return $false
             }
         }
     }
+    return $false
 }
 
-#endregion
-
-#region State Management
-
-function Get-LastSyncTime {
-    param([string]$TableName)
-    
-    $stateFile = ".\sync_state.json"
-    
-    if (Test-Path $stateFile) {
-        $state = Get-Content $stateFile -Raw | ConvertFrom-Json -AsHashtable -ErrorAction SilentlyContinue
-        if ($state -and $state[$TableName]) {
-            return [datetime]$state[$TableName]
-        }
-    }
-    
-    return [datetime]::MinValue
-}
-
-function Set-LastSyncTime {
+function Upload-TableMetaToR2 {
     param(
-        [string]$TableName,
-        [datetime]$SyncTime
+        $MetaFilePath,
+        $R2Key,
+        $CloudflareConfig
     )
     
-    $stateFile = ".\sync_state.json"
+    $uri = "$($CloudflareConfig.apiUrl)/api/sync/r2/upload"
     
-    $state = @{}
-    if (Test-Path $stateFile) {
-        $existing = Get-Content $stateFile -Raw | ConvertFrom-Json -AsHashtable -ErrorAction SilentlyContinue
-        if ($existing) { $state = $existing }
+    $fileContent = Get-Content -Path $MetaFilePath -Raw -Encoding UTF8
+    
+    $body = @{
+        key = $R2Key
+        content = $fileContent
+        contentType = "application/json"
+    } | ConvertTo-Json -Depth 5 -Compress
+    
+    $headers = @{
+        "Content-Type" = "application/json"
+        "X-Sync-API-Key" = $CloudflareConfig.syncApiKey
     }
     
-    $state[$TableName] = $SyncTime.ToString("o")
-    $state | ConvertTo-Json | Set-Content $stateFile
+    if ($script:DryRun) {
+        return $true
+    }
+    
+    try {
+        Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -TimeoutSec 60 | Out-Null
+        return $true
+    }
+    catch {
+        Write-Log "      Failed to upload metadata: $_" -Level Warning
+        return $false
+    }
+}
+
+function Request-EmbeddingGeneration {
+    param(
+        $DatabaseName,
+        $TableKey,
+        $CloudflareConfig
+    )
+    
+    $uri = "$($CloudflareConfig.apiUrl)/api/sync/embeddings/generate"
+    
+    $body = @{
+        database = $DatabaseName
+        tableKey = $TableKey
+    } | ConvertTo-Json
+    
+    $headers = @{
+        "Content-Type" = "application/json"
+        "X-Sync-API-Key" = $CloudflareConfig.syncApiKey
+    }
+    
+    if ($script:DryRun -or $script:SkipEmbeddings) {
+        return $true
+    }
+    
+    try {
+        $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -TimeoutSec 300
+        return $response
+    }
+    catch {
+        Write-Log "      Failed to generate embeddings: $_" -Level Warning
+        return $null
+    }
 }
 
 #endregion
@@ -544,140 +588,175 @@ function Set-LastSyncTime {
 
 function Start-Sync {
     Write-Log "========================================" -Level Info
-    Write-Log "AskMeSC Data Sync Starting" -Level Info
+    Write-Log "AskMeSC R2 Data Sync Starting" -Level Info
     Write-Log "Config: $ConfigPath" -Level Info
     Write-Log "Full Sync: $FullSync" -Level Info
     Write-Log "Dry Run: $DryRun" -Level Info
     Write-Log "Discover Only: $DiscoverOnly" -Level Info
+    Write-Log "Skip Embeddings: $SkipEmbeddings" -Level Info
+    if ($DatabaseName) { Write-Log "Database Filter: $DatabaseName" -Level Info }
     Write-Log "========================================" -Level Info
     
     # Load configuration
     $script:Config = Load-Configuration -Path $ConfigPath
     
-    # Connect to SQL Server
-    Write-Log "Connecting to SQL Server: $($script:Config.sqlServer.server)/$($script:Config.sqlServer.database)" -Level Info
-    $connection = Connect-SqlServer -Config $script:Config.sqlServer
-    Write-Log "Connected successfully" -Level Info
-    
-    $totalRecords = 0
-    $totalEmbedded = 0
-    $tablesProcessed = 0
-    
-    try {
-        # Discover tables
-        $tables = Discover-Tables -Connection $connection -DiscoveryConfig $script:Config.discovery
-        
-        if ($DiscoverOnly) {
-            Write-Log "" -Level Info
-            Write-Log "Tables that would be synced:" -Level Info
-            Write-Log "-" * 60 -Level Info
-            foreach ($t in $tables) {
-                Write-Log ("  {0,-40} {1,10:N0} rows" -f $t.FullName, $t.RowCount) -Level Info
-            }
-            Write-Log "-" * 60 -Level Info
-            Write-Log "Total: $($tables.Count) tables" -Level Info
-            return
+    # Process each enabled database
+    foreach ($dbConfig in $script:Config.databases) {
+        if (-not $dbConfig.enabled) {
+            Write-Log "Skipping disabled database: $($dbConfig.name)" -Level Info
+            continue
         }
         
-        foreach ($tableInfo in $tables) {
-            $schemaName = $tableInfo.Schema
-            $tableName = $tableInfo.Table
-            $fullName = $tableInfo.FullName
+        if ($DatabaseName -and $dbConfig.name -ne $DatabaseName) {
+            continue
+        }
+        
+        Write-Log "" -Level Info
+        Write-Log "Processing database: $($dbConfig.name)" -Level Info
+        Write-Log "-" * 50 -Level Info
+        
+        # Connect to SQL Server
+        Write-Log "Connecting to $($dbConfig.sqlServer.server)/$($dbConfig.sqlServer.database)..." -Level Info
+        
+        try {
+            $connection = Connect-SqlServer -SqlConfig $dbConfig.sqlServer
+            Write-Log "Connected successfully" -Level Success
+        }
+        catch {
+            Write-Log "Failed to connect: $_" -Level Error
+            $script:Stats.Errors += "Database $($dbConfig.name): Connection failed - $_"
+            continue
+        }
+        
+        try {
+            # Discover tables
+            Write-Log "Discovering tables..." -Level Info
+            $tables = Discover-Tables -Connection $connection -DiscoveryConfig $dbConfig.discovery
+            Write-Log "Found $($tables.Count) tables to process" -Level Info
             
-            Write-Log "" -Level Info
-            Write-Log "Processing: $fullName ($($tableInfo.RowCount) rows)" -Level Info
+            if ($DiscoverOnly) {
+                Write-Log "" -Level Info
+                Write-Log "Tables in $($dbConfig.name):" -Level Info
+                Write-Log "-" * 60 -Level Info
+                $totalRows = 0
+                foreach ($t in $tables | Sort-Object -Property RowCount -Descending) {
+                    Write-Log ("  {0,-45} {1,12:N0} rows" -f $t.FullName, $t.RowCount) -Level Info
+                    $totalRows += $t.RowCount
+                }
+                Write-Log "-" * 60 -Level Info
+                Write-Log ("  {0,-45} {1,12:N0} total" -f "TOTAL ($($tables.Count) tables)", $totalRows) -Level Info
+                continue
+            }
             
-            try {
-                # Get column information
-                $columns = Get-TableColumns -Connection $connection -SchemaName $schemaName -TableName $tableName
+            # Create database export directory
+            $dbExportPath = Join-Path $script:Config.sync.exportPath $dbConfig.name
+            if (-not (Test-Path $dbExportPath)) {
+                New-Item -ItemType Directory -Path $dbExportPath -Force | Out-Null
+            }
+            
+            # Process each table
+            foreach ($tableInfo in $tables) {
+                Write-Log "" -Level Info
+                Write-Log "  Processing: $($tableInfo.FullName) ($($tableInfo.RowCount) rows)" -Level Info
                 
-                if ($columns.Rows.Count -eq 0) {
-                    Write-Log "  No columns found, skipping" -Level Warning
-                    continue
-                }
-                
-                # Find primary key
-                $pkColumn = Get-PrimaryKeyColumn -Columns $columns
-                Write-Log "  Primary key: $pkColumn" -Level Debug
-                
-                # Get data
-                $maxRecords = $script:Config.sync.maxRecordsPerTable
-                $data = Get-TableData -Connection $connection -SchemaName $schemaName -TableName $tableName -Columns $columns -MaxRecords $maxRecords -DiscoveryConfig $script:Config.discovery
-                
-                if ($null -eq $data -or $data.Rows.Count -eq 0) {
-                    Write-Log "  No data to sync" -Level Info
-                    continue
-                }
-                
-                Write-Log "  Retrieved $($data.Rows.Count) rows" -Level Info
-                
-                # Transform records
-                $records = @()
-                foreach ($row in $data.Rows) {
-                    $record = Transform-Record -Row $row -Columns $columns -TableFullName $fullName -PrimaryKeyColumn $pkColumn -Config $script:Config
-                    if ($record.id) {
-                        $records += $record
-                    }
-                }
-                
-                Write-Log "  Transformed $($records.Count) records" -Level Info
-                
-                if ($records.Count -eq 0) {
-                    continue
-                }
-                
-                # Upload in batches
-                $batchSize = $script:Config.sync.batchSize
-                $batches = [math]::Ceiling($records.Count / $batchSize)
-                $tableTarget = $fullName -replace '\.', '_'
-                
-                for ($i = 0; $i -lt $batches; $i++) {
-                    $start = $i * $batchSize
-                    $end = [math]::Min($start + $batchSize - 1, $records.Count - 1)
-                    $batch = $records[$start..$end]
+                try {
+                    # Get columns
+                    $columns = Get-TableColumns -Connection $connection -SchemaName $tableInfo.Schema -TableName $tableInfo.Table
                     
-                    Write-Log "  Uploading batch $($i + 1)/$batches ($($batch.Count) records)" -Level Info
-                    
-                    $result = Send-ToCloudflare -Records $batch -TableName $tableTarget -Config $script:Config
-                    
-                    if ($result.success) {
-                        $totalRecords += $result.inserted
-                        $totalEmbedded += $result.embedded
+                    if ($columns.Rows.Count -eq 0) {
+                        Write-Log "    No columns found, skipping" -Level Warning
+                        continue
                     }
                     
-                    if ($result.errors) {
-                        foreach ($error in $result.errors) {
-                            Write-Log "  Batch error: $error" -Level Warning
+                    # Export to chunks
+                    $chunks = Export-TableToChunks `
+                        -Connection $connection `
+                        -SchemaName $tableInfo.Schema `
+                        -TableName $tableInfo.Table `
+                        -Columns $columns `
+                        -DbConfig $dbConfig `
+                        -ChunkSize $script:Config.r2.chunkSize `
+                        -ExportPath $dbExportPath
+                    
+                    if ($chunks.Count -eq 0) {
+                        continue
+                    }
+                    
+                    # Upload chunks to R2
+                    Write-Log "    Uploading to R2..." -Level Info
+                    $uploadedCount = 0
+                    foreach ($chunk in $chunks) {
+                        $success = Upload-ChunkToR2 -ChunkInfo $chunk -CloudflareConfig $script:Config.cloudflare
+                        if ($success) {
+                            $uploadedCount++
+                            $script:Stats.ChunksUploaded++
                         }
                     }
+                    Write-Log "    Uploaded $uploadedCount/$($chunks.Count) chunks" -Level Info
+                    
+                    # Upload table metadata
+                    $tableKey = $tableInfo.FullName -replace '\.', '_'
+                    $metaFilePath = Join-Path $dbExportPath $tableKey "_meta.json"
+                    $metaR2Key = "databases/$($dbConfig.name)/tables/$tableKey/_meta.json"
+                    Upload-TableMetaToR2 -MetaFilePath $metaFilePath -R2Key $metaR2Key -CloudflareConfig $script:Config.cloudflare | Out-Null
+                    
+                    # Request embedding generation
+                    if (-not $SkipEmbeddings) {
+                        Write-Log "    Generating embeddings..." -Level Info
+                        $embedResult = Request-EmbeddingGeneration -DatabaseName $dbConfig.name -TableKey $tableKey -CloudflareConfig $script:Config.cloudflare
+                        if ($embedResult) {
+                            Write-Log "    Embeddings queued" -Level Info
+                        }
+                    }
+                    
+                    $script:Stats.TablesProcessed++
                 }
-                
-                $tablesProcessed++
-                
-                # Update sync state
-                if (-not $DryRun) {
-                    Set-LastSyncTime -TableName $fullName -SyncTime (Get-Date)
+                catch {
+                    Write-Log "    Error processing table: $_" -Level Error
+                    $script:Stats.Errors += "$($tableInfo.FullName): $_"
                 }
             }
-            catch {
-                Write-Log "  Error processing table: $_" -Level Error
+            
+            # Write database metadata
+            $dbMetaPath = Join-Path $dbExportPath "_meta.json"
+            $dbMeta = @{
+                name = $dbConfig.name
+                server = $dbConfig.sqlServer.server
+                database = $dbConfig.sqlServer.database
+                tableCount = $tables.Count
+                syncedAt = (Get-Date).ToString("o")
             }
+            $dbMeta | ConvertTo-Json | Set-Content -Path $dbMetaPath -Encoding UTF8
+            
+            # Upload database metadata to R2
+            $dbMetaR2Key = "databases/$($dbConfig.name)/_meta.json"
+            Upload-TableMetaToR2 -MetaFilePath $dbMetaPath -R2Key $dbMetaR2Key -CloudflareConfig $script:Config.cloudflare | Out-Null
+        }
+        finally {
+            $connection.Close()
+            $connection.Dispose()
         }
     }
-    finally {
-        $connection.Close()
-        $connection.Dispose()
-    }
     
+    # Print summary
     $duration = (Get-Date) - $script:StartTime
     
     Write-Log "" -Level Info
     Write-Log "========================================" -Level Info
-    Write-Log "Sync Complete" -Level Info
-    Write-Log "Tables processed: $tablesProcessed" -Level Info
-    Write-Log "Total records: $totalRecords" -Level Info
-    Write-Log "Total embeddings: $totalEmbedded" -Level Info
-    Write-Log "Duration: $($duration.TotalMinutes.ToString('F2')) minutes" -Level Info
+    Write-Log "Sync Complete" -Level Success
+    Write-Log "  Tables processed: $($script:Stats.TablesProcessed)" -Level Info
+    Write-Log "  Rows exported: $($script:Stats.RowsExported)" -Level Info
+    Write-Log "  Chunks uploaded: $($script:Stats.ChunksUploaded)" -Level Info
+    Write-Log "  Duration: $($duration.ToString('hh\:mm\:ss'))" -Level Info
+    
+    if ($script:Stats.Errors.Count -gt 0) {
+        Write-Log "" -Level Info
+        Write-Log "Errors encountered:" -Level Warning
+        foreach ($err in $script:Stats.Errors) {
+            Write-Log "  - $err" -Level Warning
+        }
+    }
+    
     Write-Log "========================================" -Level Info
 }
 

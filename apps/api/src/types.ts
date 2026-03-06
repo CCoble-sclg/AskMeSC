@@ -1,8 +1,8 @@
 export interface Env {
-  // D1 Database
+  // D1 Database (index only)
   DB: D1Database;
   
-  // R2 Storage
+  // R2 Storage (full data)
   STORAGE: R2Bucket;
   
   // Vectorize for embeddings
@@ -24,6 +24,10 @@ export interface ChatMessage {
 export interface ChatRequest {
   message: string;
   conversationId?: string;
+  filters?: {
+    database?: string;
+    tables?: string[];
+  };
 }
 
 export interface ChatResponse {
@@ -39,13 +43,6 @@ export interface Source {
   score: number;
 }
 
-export interface SyncRecord {
-  id: string;
-  table: string;
-  content: string;
-  metadata: Record<string, unknown>;
-}
-
 export interface EmbeddingChunk {
   id: string;
   text: string;
@@ -53,5 +50,48 @@ export interface EmbeddingChunk {
     table: string;
     recordId: string;
     chunkIndex: number;
+    database?: string;
+    r2Key?: string;
   };
+}
+
+export interface TableIndex {
+  databaseName: string;
+  tableKey: string;
+  schemaName?: string;
+  tableName?: string;
+  rowCount: number;
+  chunkCount: number;
+  embeddingCount: number;
+  lastSync?: string;
+}
+
+export interface DatabaseInfo {
+  name: string;
+  server?: string;
+  tableCount: number;
+  totalRows: number;
+  lastSync?: string;
+}
+
+export interface R2ChunkData {
+  database: string;
+  table: string;
+  tableKey: string;
+  chunkIndex: number;
+  rowCount: number;
+  rows: Array<Record<string, unknown>>;
+}
+
+export interface R2TableMeta {
+  database: string;
+  schema: string;
+  table: string;
+  fullName: string;
+  tableKey: string;
+  totalRows: number;
+  chunkCount: number;
+  primaryKey?: string;
+  columns: Array<{ name: string; type: string }>;
+  exportedAt: string;
 }
