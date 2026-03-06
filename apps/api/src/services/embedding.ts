@@ -6,8 +6,12 @@ const CHUNK_OVERLAP = 50;
 const TEXT_FIELD_PATTERNS = [
   'description', 'notes', 'comments', 'remarks', 'details',
   'summary', 'name', 'title', 'address', 'memo', 'text',
-  'content', 'body', 'message', 'subject'
+  'content', 'body', 'message', 'subject', 'vendor', 'customer',
+  'company', 'employee', 'account', 'code', 'number', 'reference',
+  'invoice', 'payment', 'amount', 'date', 'status', 'type'
 ];
+
+const SKIP_COLUMNS = ['id', 'guid', 'hash', 'password', 'token', 'key', 'secret'];
 
 export class EmbeddingService {
   private env: Env;
@@ -41,15 +45,24 @@ export class EmbeddingService {
       if (key.startsWith('_')) continue;
       if (value === null || value === undefined) continue;
       
-      const strValue = String(value).trim();
-      if (strValue.length < 10) continue;
-
       const keyLower = key.toLowerCase();
+      
+      // Skip sensitive or non-useful columns
+      if (SKIP_COLUMNS.some(skip => keyLower.includes(skip))) continue;
+      
+      const strValue = String(value).trim();
+      
+      // Skip very short values or purely numeric IDs
+      if (strValue.length < 3) continue;
+      if (/^\d+$/.test(strValue) && strValue.length < 6) continue;
+      
+      // Include if it matches text patterns OR has substantial text content
       const isTextField = TEXT_FIELD_PATTERNS.some(pattern => 
         keyLower.includes(pattern)
       );
+      const hasTextContent = strValue.length >= 5 && !/^[\d.,-]+$/.test(strValue);
 
-      if (isTextField) {
+      if (isTextField || hasTextContent) {
         parts.push(`${key}: ${strValue}`);
       }
     }
