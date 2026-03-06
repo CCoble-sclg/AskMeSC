@@ -1,19 +1,11 @@
 <script lang="ts">
   import { marked } from 'marked';
-  import { onMount } from 'svelte';
 
   let { content }: { content: string } = $props();
   let html = $state('');
 
   $effect(() => {
-    const renderer = new marked.Renderer();
-    
-    renderer.table = (header: string, body: string) => {
-      return `<div class="table-wrapper"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
-    };
-
     marked.setOptions({
-      renderer,
       gfm: true,
       breaks: true,
     });
