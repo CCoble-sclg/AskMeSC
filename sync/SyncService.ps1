@@ -110,7 +110,7 @@ function Discover-Tables {
 SELECT 
     s.name AS SchemaName,
     t.name AS TableName,
-    SUM(p.rows) AS RowCount
+    SUM(p.rows) AS TableRowCount
 FROM sys.tables t
 INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
 INNER JOIN sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)
@@ -159,7 +159,7 @@ ORDER BY s.name, t.name
             Schema = $schemaName
             Table = $tableName
             FullName = $fullName
-            RowCount = $table.RowCount
+            RowCount = $table.TableRowCount
         }
     }
     
