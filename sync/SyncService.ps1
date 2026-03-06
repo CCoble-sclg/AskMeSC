@@ -106,8 +106,18 @@ function Load-Configuration {
     Write-Log "  Export path: $($config.sync.exportPath)" -Level Debug
     
     # Ensure export directory exists
-    if ($config.sync.exportPath -and -not (Test-Path $config.sync.exportPath)) {
-        New-Item -ItemType Directory -Path $config.sync.exportPath -Force | Out-Null
+    if ($config.sync.exportPath) {
+        if (-not (Test-Path $config.sync.exportPath)) {
+            Write-Log "  Creating export directory..." -Level Debug
+            try {
+                New-Item -ItemType Directory -Path $config.sync.exportPath -Force | Out-Null
+                Write-Log "  Export directory created: $($config.sync.exportPath)" -Level Debug
+            } catch {
+                Write-Log "  ERROR creating export directory: $_" -Level Error
+            }
+        } else {
+            Write-Log "  Export directory exists" -Level Debug
+        }
     }
     
     return $config
