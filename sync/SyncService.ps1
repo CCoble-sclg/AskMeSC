@@ -246,12 +246,19 @@ function Export-TableToChunks {
         $ExportPath
     )
     
+    # Check if columns exist
+    if ($null -eq $Columns -or $null -eq $Columns.Rows -or $Columns.Rows.Count -eq 0) {
+        Write-Log "    No columns found for table" -Level Warning
+        return @()
+    }
+    
     # Build column list
     $selectColumns = @()
     $binaryColumns = @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')
     
     foreach ($col in $Columns.Rows) {
-        $dataType = $col.DataType.ToLower()
+        if ($null -eq $col.DataType) { continue }
+        $dataType = $col.DataType.ToString().ToLower()
         if ($dataType -in $binaryColumns) {
             continue
         }
@@ -275,10 +282,11 @@ function Export-TableToChunks {
     # Determine query strategy
     $dateColumn = $null
     foreach ($col in $Columns.Rows) {
+        if ($null -eq $col.DataType -or $null -eq $col.ColumnName) { continue }
         if ($DbConfig.discovery.dateColumnNames) {
             foreach ($dateName in $DbConfig.discovery.dateColumnNames) {
                 if ($col.ColumnName -eq $dateName -or $col.ColumnName -like "*$dateName*") {
-                    $dataType = $col.DataType.ToLower()
+                    $dataType = $col.DataType.ToString().ToLower()
                     if ($dataType -in @('datetime', 'datetime2', 'date', 'smalldatetime')) {
                         $dateColumn = $col.ColumnName
                         break
@@ -353,7 +361,8 @@ function Export-TableToChunks {
             
             foreach ($col in $Columns.Rows) {
                 $colName = $col.ColumnName
-                $dataType = $col.DataType.ToLower()
+                if ($null -eq $colName -or $null -eq $col.DataType) { continue }
+                $dataType = $col.DataType.ToString().ToLower()
                 
                 if ($dataType -in $binaryColumns) {
                     continue
@@ -361,15 +370,21 @@ function Export-TableToChunks {
                 
                 # Check if should skip (sanitization)
                 $shouldSkip = $false
-                foreach ($rule in $DbConfig.sanitization.rules) {
-                    if ($colName -like "*$($rule.columnPattern)*" -and $rule.action -eq "skip") {
-                        $shouldSkip = $true
-                        break
+                if ($DbConfig.sanitization -and $DbConfig.sanitization.rules) {
+                    foreach ($rule in $DbConfig.sanitization.rules) {
+                        if ($colName -like "*$($rule.columnPattern)*" -and $rule.action -eq "skip") {
+                            $shouldSkip = $true
+                            break
+                        }
                     }
                 }
                 if ($shouldSkip) { continue }
                 
-                $value = $row.$colName
+                try {
+                    $value = $row.$colName
+                } catch {
+                    $value = $null
+                }
                 
                 if ($null -eq $value -or $value -is [DBNull]) {
                     $record[$colName] = $null
@@ -377,18 +392,20 @@ function Export-TableToChunks {
                     $strValue = $value.ToString()
                     
                     # Apply masking
-                    foreach ($pattern in $DbConfig.sanitization.maskPatterns) {
-                        if ($colName -like "*$($pattern.columnPattern)*") {
-                            switch ($pattern.action) {
-                                "mask_email" {
-                                    if ($strValue -match "^(.)[^@]*(@.*)$") {
-                                        $strValue = $Matches[1] + "****" + $Matches[2]
+                    if ($DbConfig.sanitization -and $DbConfig.sanitization.maskPatterns) {
+                        foreach ($pattern in $DbConfig.sanitization.maskPatterns) {
+                            if ($colName -like "*$($pattern.columnPattern)*") {
+                                switch ($pattern.action) {
+                                    "mask_email" {
+                                        if ($strValue -match "^(.)[^@]*(@.*)$") {
+                                            $strValue = $Matches[1] + "****" + $Matches[2]
+                                        }
                                     }
-                                }
-                                "mask_phone" {
-                                    $digits = $strValue -replace "[^\d]", ""
-                                    if ($digits.Length -ge 4) {
-                                        $strValue = "(***) ***-" + $digits.Substring($digits.Length - 4)
+                                    "mask_phone" {
+                                        $digits = $strValue -replace "[^\d]", ""
+                                        if ($digits.Length -ge 4) {
+                                            $strValue = "(***) ***-" + $digits.Substring($digits.Length - 4)
+                                        }
                                     }
                                 }
                             }
@@ -400,7 +417,7 @@ function Export-TableToChunks {
             }
             
             # Add primary key as _id
-            if ($pkColumn -and $record[$pkColumn]) {
+            if ($pkColumn -and $record.ContainsKey($pkColumn) -and $null -ne $record[$pkColumn]) {
                 $record["_id"] = $record[$pkColumn].ToString()
             } else {
                 $record["_id"] = [guid]::NewGuid().ToString()
