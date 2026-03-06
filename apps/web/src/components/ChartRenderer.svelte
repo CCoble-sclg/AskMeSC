@@ -4,9 +4,8 @@
   import type { ChartData } from '$lib/types';
 
   let { data }: { data: ChartData } = $props();
-  let canvasEl: HTMLCanvasElement | undefined = $state(undefined);
+  let canvasEl: HTMLCanvasElement;
   let chart: any = null;
-  let ChartJS: any = $state(null);
   let ready = $state(false);
 
   const colors = [
@@ -23,28 +22,16 @@
   const borderColors = colors.map(c => c.replace('0.8', '1'));
 
   onMount(async () => {
-    if (browser) {
-      const { Chart, registerables } = await import('chart.js');
-      Chart.register(...registerables);
-      ChartJS = Chart;
-      ready = true;
-    }
-  });
-
-  onDestroy(() => {
-    if (chart) {
-      chart.destroy();
-      chart = null;
-    }
-  });
-
-  function createChart() {
-    if (!canvasEl || !data || !ChartJS) return;
+    if (!browser) return;
     
-    if (chart) {
-      chart.destroy();
-      chart = null;
-    }
+    const { Chart, registerables } = await import('chart.js');
+    Chart.register(...registerables);
+    ready = true;
+    
+    // Wait for next tick to ensure canvas is bound
+    await new Promise(resolve => setTimeout(resolve, 0));
+    
+    if (!canvasEl || !data) return;
 
     const isPie = data.type === 'pie' || data.type === 'doughnut';
 
@@ -56,7 +43,7 @@
       tension: data.type === 'line' ? 0.3 : undefined,
     }));
 
-    chart = new ChartJS(canvasEl, {
+    chart = new Chart(canvasEl, {
       type: data.type,
       data: {
         labels: data.labels,
@@ -92,11 +79,12 @@
         },
       },
     });
-  }
+  });
 
-  $effect(() => {
-    if (ready && canvasEl && data && ChartJS) {
-      requestAnimationFrame(() => createChart());
+  onDestroy(() => {
+    if (chart) {
+      chart.destroy();
+      chart = null;
     }
   });
 </script>
