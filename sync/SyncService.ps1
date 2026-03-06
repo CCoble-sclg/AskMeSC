@@ -500,13 +500,13 @@ function Upload-ChunkToR2 {
     
     $uri = "$($CloudflareConfig.apiUrl)/api/sync/r2/upload"
     
-    $fileContent = Get-Content -Path $ChunkInfo.FilePath -Raw -Encoding UTF8
+    $fileContent = [System.IO.File]::ReadAllText($ChunkInfo.FilePath, [System.Text.Encoding]::UTF8)
     
     $body = @{
         key = $ChunkInfo.R2Key
         content = $fileContent
         contentType = "application/json"
-    } | ConvertTo-Json -Depth 5 -Compress
+    } | ConvertTo-Json -Depth 10 -Compress
     
     $headers = @{
         "Content-Type" = "application/json"
@@ -553,7 +553,7 @@ function Upload-TableMetaToR2 {
     
     $uri = "$($CloudflareConfig.apiUrl)/api/sync/r2/upload"
     
-    $fileContent = Get-Content -Path $MetaFilePath -Raw -Encoding UTF8
+    $fileContent = [System.IO.File]::ReadAllText($MetaFilePath, [System.Text.Encoding]::UTF8)
     
     if ([string]::IsNullOrWhiteSpace($fileContent)) {
         Write-Log "      Metadata file is empty" -Level Warning
@@ -564,7 +564,7 @@ function Upload-TableMetaToR2 {
         key = $R2Key
         content = $fileContent
         contentType = "application/json"
-    } | ConvertTo-Json -Depth 5 -Compress
+    } | ConvertTo-Json -Depth 10 -Compress
     
     $headers = @{
         "Content-Type" = "application/json"
