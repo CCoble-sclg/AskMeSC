@@ -670,6 +670,18 @@ function Start-Sync {
     # Load configuration
     $script:Config = Load-Configuration -Path $ConfigPath
     
+    # Ensure export directory exists (with console output for debugging)
+    Write-Host "[DEBUG] Export path from config: $($script:Config.sync.exportPath)" -ForegroundColor Cyan
+    if (-not (Test-Path $script:Config.sync.exportPath)) {
+        Write-Host "[DEBUG] Creating export directory: $($script:Config.sync.exportPath)" -ForegroundColor Cyan
+        New-Item -ItemType Directory -Path $script:Config.sync.exportPath -Force | Out-Null
+    }
+    if (Test-Path $script:Config.sync.exportPath) {
+        Write-Host "[DEBUG] Export directory exists: $($script:Config.sync.exportPath)" -ForegroundColor Green
+    } else {
+        Write-Host "[DEBUG] FAILED to create export directory!" -ForegroundColor Red
+    }
+    
     # Process each enabled database
     foreach ($dbConfig in $script:Config.databases) {
         if (-not $dbConfig.enabled) {
