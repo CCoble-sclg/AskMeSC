@@ -1,0 +1,21 @@
+{
+  "name": "askmesc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Citizen Chatbot for Santa Clara - Cloudflare Pages/Workers with RAG",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "build:api": "npm run build -w apps/api",
+    "build:web": "npm run build -w apps/web",
+    "deploy:api": "npm run deploy -w apps/api",
+    "deploy:web": "npm run deploy -w apps/web"
+  },
+  "keywords": ["cloudflare", "workers", "d1", "r2", "vectorize", "rag", "chatbot"],
+  "author": "",
+  "license": "PRIVATE"
+}

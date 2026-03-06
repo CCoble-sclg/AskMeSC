@@ -1,0 +1,38 @@
+{
+  "sqlServer": {
+    "server": "YOUR_SQL_SERVER",
+    "database": "YOUR_DATABASE",
+    "integratedSecurity": true
+  },
+  "cloudflare": {
+    "apiUrl": "https://askmesc-api.YOUR_SUBDOMAIN.workers.dev",
+    "syncApiKey": "YOUR_SYNC_API_KEY"
+  },
+  "tables": [
+    {
+      "source": "dbo.Permits",
+      "target": "permits",
+      "columns": [
+        { "source": "PermitID", "target": "id", "type": "TEXT", "primaryKey": true },
+        { "source": "PropertyAddress", "target": "address", "type": "TEXT" },
+        { "source": "PermitType", "target": "type", "type": "TEXT" },
+        { "source": "Status", "target": "status", "type": "TEXT" },
+        { "source": "Description", "target": "description", "type": "TEXT", "embed": true },
+        { "source": "IssuedDate", "target": "issued_date", "type": "TEXT" },
+        { "source": "ApplicantName", "target": "applicant", "type": "TEXT", "sanitize": "mask_name" },
+        { "source": "ApplicantSSN", "skip": true }
+      ],
+      "modifiedColumn": "LastModified",
+      "embedFields": ["description", "address"]
+    }
+  ],
+  "sync": {
+    "batchSize": 500,
+    "retryAttempts": 3,
+    "retryDelayMs": 5000
+  },
+  "logging": {
+    "logPath": "./logs",
+    "logLevel": "Info"
+  }
+}
