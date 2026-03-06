@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
-import type { Env } from '../types';
+import { neon } from '@neondatabase/serverless';
+import type { Env, TableSchema, SchemaUploadRequest } from '../types';
 import { EmbeddingService } from '../services/embedding';
+import { SchemaService, mapSqlServerToPostgres } from '../services/schema';
 
 export const syncRoutes = new Hono<{ Bindings: Env }>();
 
@@ -310,5 +312,218 @@ syncRoutes.delete('/database/:name', async (c) => {
   } catch (error) {
     console.error('Delete database error:', error);
     return c.json({ error: 'Delete failed' }, 500);
+  }
+});
+
+// Upload table schema for Text-to-SQL
+syncRoutes.post('/schema', async (c) => {
+  const body = await c.req.json<SchemaUploadRequest>();
+
+  if (!body.database || !body.tables || !Array.isArray(body.tables)) {
+    return c.json({ error: 'Database and tables array are required' }, 400);
+  }
+
+  const schemaService = new SchemaService(c.env);
+  let saved = 0;
+  const errors: string[] = [];
+
+  for (const table of body.tables) {
+    try {
+      await schemaService.saveSchema(table);
+      saved++;
+    } catch (err) {
+      errors.push(`${table.fullName}: ${err}`);
+    }
+  }
+
+  return c.json({
+    success: true,
+    saved,
+    total: body.tables.length,
+    errors: errors.length > 0 ? errors : undefined,
+  });
+});
+
+// Get all schemas
+syncRoutes.get('/schema', async (c) => {
+  const database = c.req.query('database');
+  const schemaService = new SchemaService(c.env);
+
+  try {
+    const schemas = await schemaService.getAllSchemas(database);
+    return c.json({ schemas });
+  } catch (error) {
+    console.error('Get schemas error:', error);
+    return c.json({ error: 'Failed to get schemas' }, 500);
+  }
+});
+
+// Execute SQL directly on Neon (for sync service)
+syncRoutes.post('/postgres/execute', async (c) => {
+  const body = await c.req.json<{ sql: string; params?: unknown[] }>();
+
+  if (!body.sql) {
+    return c.json({ error: 'SQL is required' }, 400);
+  }
+
+  if (!c.env.NEON_DATABASE_URL) {
+    return c.json({ error: 'Neon database not configured' }, 503);
+  }
+
+  try {
+    const sql = neon(c.env.NEON_DATABASE_URL);
+    const result = await sql.query(body.sql, body.params || []);
+    
+    return c.json({
+      success: true,
+      rowCount: result.rows?.length || 0,
+    });
+  } catch (error) {
+    console.error('Postgres execute error:', error);
+    return c.json({ error: 'Query failed', details: String(error) }, 500);
+  }
+});
+
+// Batch insert rows into Neon
+syncRoutes.post('/postgres/insert', async (c) => {
+  const body = await c.req.json<{
+    table: string;
+    columns: string[];
+    rows: unknown[][];
+  }>();
+
+  if (!body.table || !body.columns || !body.rows) {
+    return c.json({ error: 'Table, columns, and rows are required' }, 400);
+  }
+
+  if (!c.env.NEON_DATABASE_URL) {
+    return c.json({ error: 'Neon database not configured' }, 503);
+  }
+
+  try {
+    const sql = neon(c.env.NEON_DATABASE_URL);
+    
+    const placeholders = body.columns.map((_, i) => `$${i + 1}`).join(', ');
+    const columnList = body.columns.map(col => `"${col}"`).join(', ');
+    const insertSql = `INSERT INTO "${body.table}" (${columnList}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`;
+    
+    let inserted = 0;
+    for (const row of body.rows) {
+      try {
+        await sql.query(insertSql, row as any[]);
+        inserted++;
+      } catch (err) {
+        console.error(`Row insert error: ${err}`);
+      }
+    }
+
+    return c.json({
+      success: true,
+      inserted,
+      total: body.rows.length,
+    });
+  } catch (error) {
+    console.error('Postgres insert error:', error);
+    return c.json({ error: 'Insert failed', details: String(error) }, 500);
+  }
+});
+
+// Create table in Neon from schema
+syncRoutes.post('/postgres/create-table', async (c) => {
+  const body = await c.req.json<TableSchema>();
+
+  if (!body.tableName || !body.columns) {
+    return c.json({ error: 'Table name and columns are required' }, 400);
+  }
+
+  if (!c.env.NEON_DATABASE_URL) {
+    return c.json({ error: 'Neon database not configured' }, 503);
+  }
+
+  try {
+    const sql = neon(c.env.NEON_DATABASE_URL);
+    
+    const columnDefs = body.columns.map(col => {
+      let def = `"${col.name}" ${col.postgresType}`;
+      if (col.isPrimaryKey) def += ' PRIMARY KEY';
+      if (!col.nullable && !col.isPrimaryKey) def += ' NOT NULL';
+      return def;
+    }).join(',\n  ');
+
+    const tableName = body.fullName.replace('.', '_');
+    
+    await sql.query(`DROP TABLE IF EXISTS "${tableName}"`);
+    await sql.query(`CREATE TABLE "${tableName}" (${columnDefs})`);
+
+    return c.json({ success: true, table: tableName });
+  } catch (error) {
+    console.error('Create table error:', error);
+    return c.json({ error: 'Create table failed', details: String(error) }, 500);
+  }
+});
+
+// Document upload endpoint for contracts/policies
+syncRoutes.post('/documents/upload', async (c) => {
+  const formData = await c.req.formData();
+  const file = formData.get('file') as File;
+  const category = formData.get('category') as string || 'general';
+  const description = formData.get('description') as string || '';
+
+  if (!file) {
+    return c.json({ error: 'File is required' }, 400);
+  }
+
+  const docId = crypto.randomUUID();
+  const r2Key = `documents/${category}/${docId}/${file.name}`;
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    await c.env.STORAGE.put(r2Key, arrayBuffer, {
+      httpMetadata: {
+        contentType: file.type,
+      },
+      customMetadata: {
+        filename: file.name,
+        category,
+        description,
+      },
+    });
+
+    await c.env.DB.prepare(`
+      INSERT INTO documents (id, filename, content_type, category, description, r2_key, file_size, uploaded_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `).bind(docId, file.name, file.type, category, description, r2Key, file.size).run();
+
+    return c.json({
+      success: true,
+      documentId: docId,
+      r2Key,
+      filename: file.name,
+    });
+  } catch (error) {
+    console.error('Document upload error:', error);
+    return c.json({ error: 'Upload failed', details: String(error) }, 500);
+  }
+});
+
+// List documents
+syncRoutes.get('/documents', async (c) => {
+  const category = c.req.query('category');
+
+  try {
+    let query = 'SELECT * FROM documents';
+    if (category) {
+      query += ' WHERE category = ?';
+    }
+    query += ' ORDER BY uploaded_at DESC';
+
+    const result = category
+      ? await c.env.DB.prepare(query).bind(category).all()
+      : await c.env.DB.prepare(query).all();
+
+    return c.json({ documents: result.results });
+  } catch (error) {
+    console.error('List documents error:', error);
+    return c.json({ error: 'Failed to list documents' }, 500);
   }
 });

@@ -515,6 +515,328 @@ function Export-TableToChunks {
 
 #endregion
 
+#region PostgreSQL Sync
+
+function Get-PostgresType {
+    param([string]$SqlServerType)
+    
+    $typeMap = @{
+        'int' = 'INTEGER'
+        'bigint' = 'BIGINT'
+        'smallint' = 'SMALLINT'
+        'tinyint' = 'SMALLINT'
+        'bit' = 'BOOLEAN'
+        'decimal' = 'DECIMAL'
+        'numeric' = 'NUMERIC'
+        'money' = 'DECIMAL(19,4)'
+        'smallmoney' = 'DECIMAL(10,4)'
+        'float' = 'DOUBLE PRECISION'
+        'real' = 'REAL'
+        'datetime' = 'TIMESTAMP'
+        'datetime2' = 'TIMESTAMP'
+        'smalldatetime' = 'TIMESTAMP'
+        'date' = 'DATE'
+        'time' = 'TIME'
+        'datetimeoffset' = 'TIMESTAMPTZ'
+        'char' = 'CHAR'
+        'varchar' = 'VARCHAR'
+        'text' = 'TEXT'
+        'nchar' = 'CHAR'
+        'nvarchar' = 'VARCHAR'
+        'ntext' = 'TEXT'
+        'binary' = 'BYTEA'
+        'varbinary' = 'BYTEA'
+        'image' = 'BYTEA'
+        'uniqueidentifier' = 'UUID'
+        'xml' = 'XML'
+    }
+    
+    $basetype = $SqlServerType.ToLower() -replace '\(.*$', ''
+    if ($typeMap.ContainsKey($basetype)) {
+        return $typeMap[$basetype]
+    }
+    return 'TEXT'
+}
+
+function Upload-SchemaToApi {
+    param(
+        $DbConfig,
+        $Tables,
+        $Connection,
+        $CloudflareConfig
+    )
+    
+    Write-Log "Uploading table schemas for Text-to-SQL..." -Level Info
+    
+    $schemas = @()
+    foreach ($tableInfo in $Tables) {
+        $columns = Get-TableColumns -Connection $Connection -SchemaName $tableInfo.Schema -TableName $tableInfo.Table
+        
+        if ($null -eq $columns -or $columns.Count -eq 0) { continue }
+        
+        $columnSchemas = @()
+        foreach ($col in $columns) {
+            $columnSchemas += @{
+                name = $col.ColumnName
+                type = $col.DataType
+                postgresType = (Get-PostgresType -SqlServerType $col.DataType)
+                nullable = $true
+                isPrimaryKey = $false
+                isForeignKey = $false
+            }
+        }
+        
+        $schemas += @{
+            database = $DbConfig.name
+            schema = $tableInfo.Schema
+            tableName = $tableInfo.Table
+            fullName = $tableInfo.FullName
+            columns = $columnSchemas
+            rowCount = $tableInfo.RowCount
+        }
+    }
+    
+    if ($schemas.Count -eq 0) {
+        Write-Log "No schemas to upload" -Level Warning
+        return
+    }
+    
+    $uri = "$($CloudflareConfig.apiUrl)/api/sync/schema"
+    $body = @{
+        database = $DbConfig.name
+        tables = $schemas
+    } | ConvertTo-Json -Depth 10 -Compress
+    
+    $headers = @{
+        "Content-Type" = "application/json"
+        "X-Sync-API-Key" = $CloudflareConfig.syncApiKey
+    }
+    
+    try {
+        $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -TimeoutSec 120
+        Write-Log "Uploaded $($response.saved) table schemas" -Level Success
+    }
+    catch {
+        Write-Log "Failed to upload schemas: $_" -Level Warning
+    }
+}
+
+function Sync-TableToPostgres {
+    param(
+        $TableInfo,
+        $Columns,
+        $DbConfig,
+        $Connection,
+        $CloudflareConfig
+    )
+    
+    $fullName = $TableInfo.FullName
+    $tableKey = $fullName -replace '\.', '_'
+    
+    # Build column list (skip binary columns)
+    $binaryColumns = @('image', 'varbinary', 'binary', 'timestamp', 'rowversion')
+    $selectColumns = @()
+    $columnDefs = @()
+    
+    foreach ($col in $Columns) {
+        $colName = $col.ColumnName
+        $dataType = $col.DataType
+        
+        if ([string]::IsNullOrWhiteSpace($dataType)) { continue }
+        if ($dataType.ToLower() -in $binaryColumns) { continue }
+        
+        # Check sanitization rules
+        $shouldSkip = $false
+        if ($DbConfig.sanitization -and $DbConfig.sanitization.rules) {
+            foreach ($rule in $DbConfig.sanitization.rules) {
+                if ($colName -like "*$($rule.columnPattern)*" -and $rule.action -eq "skip") {
+                    $shouldSkip = $true
+                    break
+                }
+            }
+        }
+        if ($shouldSkip) { continue }
+        
+        $selectColumns += "[$colName]"
+        $pgType = Get-PostgresType -SqlServerType $dataType
+        $columnDefs += @{
+            name = $colName
+            postgresType = $pgType
+        }
+    }
+    
+    if ($selectColumns.Count -eq 0) {
+        Write-Log "    No columns to sync for $fullName" -Level Warning
+        return $false
+    }
+    
+    # Create table in Postgres via API
+    Write-Log "    Creating table in Postgres..." -Level Debug
+    $createUri = "$($CloudflareConfig.apiUrl)/api/sync/postgres/create-table"
+    $createBody = @{
+        database = $DbConfig.name
+        schema = $TableInfo.Schema
+        tableName = $TableInfo.Table
+        fullName = $fullName
+        columns = $columnDefs | ForEach-Object {
+            @{
+                name = $_.name
+                postgresType = $_.postgresType
+                nullable = $true
+                isPrimaryKey = $false
+                isForeignKey = $false
+            }
+        }
+    } | ConvertTo-Json -Depth 5 -Compress
+    
+    $headers = @{
+        "Content-Type" = "application/json"
+        "X-Sync-API-Key" = $CloudflareConfig.syncApiKey
+    }
+    
+    try {
+        Invoke-RestMethod -Uri $createUri -Method Post -Headers $headers -Body $createBody -TimeoutSec 60 | Out-Null
+    }
+    catch {
+        Write-Log "    Failed to create table: $_" -Level Error
+        return $false
+    }
+    
+    # Query data from SQL Server
+    $columnList = $selectColumns -join ", "
+    $query = "SELECT TOP 10000 $columnList FROM [$($TableInfo.Schema)].[$($TableInfo.Table)]"
+    
+    # Add date filter if available
+    $dateColumn = $null
+    foreach ($col in $Columns) {
+        if ($null -eq $col.DataType -or $null -eq $col.ColumnName) { continue }
+        if ($DbConfig.discovery.dateColumnNames) {
+            foreach ($dateName in $DbConfig.discovery.dateColumnNames) {
+                if ($col.ColumnName -eq $dateName -or $col.ColumnName -like "*$dateName*") {
+                    $dataType = $col.DataType.ToString().ToLower()
+                    if ($dataType -in @('datetime', 'datetime2', 'date', 'smalldatetime')) {
+                        $dateColumn = $col.ColumnName
+                        break
+                    }
+                }
+            }
+        }
+        if ($dateColumn) { break }
+    }
+    
+    $isFullSyncTable = $false
+    if ($DbConfig.discovery.fullSyncTables) {
+        foreach ($fst in $DbConfig.discovery.fullSyncTables) {
+            if ($TableInfo.Table -eq $fst -or $TableInfo.Table -like "*$fst*") {
+                $isFullSyncTable = $true
+                break
+            }
+        }
+    }
+    
+    if (-not $isFullSyncTable -and $dateColumn) {
+        $yearsBack = $DbConfig.discovery.dateFilterYears
+        $query = "SELECT $columnList FROM [$($TableInfo.Schema)].[$($TableInfo.Table)] WHERE [$dateColumn] >= DATEADD(year, -$yearsBack, GETDATE())"
+    }
+    
+    $command = New-Object System.Data.SqlClient.SqlCommand($query, $Connection)
+    $command.CommandTimeout = 600
+    
+    $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
+    $dataTable = New-Object System.Data.DataTable
+    
+    try {
+        $adapter.Fill($dataTable) | Out-Null
+    }
+    catch {
+        Write-Log "    Error querying table: $_" -Level Error
+        return $false
+    }
+    
+    if ($dataTable.Rows.Count -eq 0) {
+        Write-Log "    No rows to sync" -Level Info
+        return $true
+    }
+    
+    Write-Log "    Syncing $($dataTable.Rows.Count) rows to Postgres..." -Level Info
+    
+    # Insert rows in batches
+    $insertUri = "$($CloudflareConfig.apiUrl)/api/sync/postgres/insert"
+    $batchSize = 100
+    $totalInserted = 0
+    $columnNames = $columnDefs | ForEach-Object { $_.name }
+    
+    for ($i = 0; $i -lt $dataTable.Rows.Count; $i += $batchSize) {
+        $batchRows = @()
+        $endIndex = [Math]::Min($i + $batchSize - 1, $dataTable.Rows.Count - 1)
+        
+        for ($j = $i; $j -le $endIndex; $j++) {
+            $row = $dataTable.Rows[$j]
+            $rowValues = @()
+            
+            foreach ($colDef in $columnDefs) {
+                $colName = $colDef.name
+                try {
+                    $value = $row.$colName
+                    if ($null -eq $value -or $value -is [DBNull]) {
+                        $rowValues += $null
+                    } else {
+                        $strValue = $value.ToString()
+                        
+                        # Apply masking
+                        if ($DbConfig.sanitization -and $DbConfig.sanitization.maskPatterns) {
+                            foreach ($pattern in $DbConfig.sanitization.maskPatterns) {
+                                if ($colName -like "*$($pattern.columnPattern)*") {
+                                    switch ($pattern.action) {
+                                        "mask_email" {
+                                            if ($strValue -match "^(.)[^@]*(@.*)$") {
+                                                $strValue = $Matches[1] + "****" + $Matches[2]
+                                            }
+                                        }
+                                        "mask_phone" {
+                                            $digits = $strValue -replace "[^\d]", ""
+                                            if ($digits.Length -ge 4) {
+                                                $strValue = "(***) ***-" + $digits.Substring($digits.Length - 4)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        $rowValues += $strValue
+                    }
+                }
+                catch {
+                    $rowValues += $null
+                }
+            }
+            
+            $batchRows += ,@($rowValues)
+        }
+        
+        $insertBody = @{
+            table = $tableKey
+            columns = $columnNames
+            rows = $batchRows
+        } | ConvertTo-Json -Depth 10 -Compress
+        
+        try {
+            $response = Invoke-RestMethod -Uri $insertUri -Method Post -Headers $headers -Body $insertBody -TimeoutSec 120
+            $totalInserted += $response.inserted
+        }
+        catch {
+            Write-Log "    Batch insert failed: $_" -Level Warning
+        }
+    }
+    
+    Write-Log "    Inserted $totalInserted rows to Postgres" -Level Success
+    $script:Stats.RowsExported += $totalInserted
+    return $true
+}
+
+#endregion
+
 #region Cloudflare R2 Upload
 
 function Upload-ChunkToR2 {
@@ -730,7 +1052,17 @@ function Start-Sync {
                 continue
             }
             
-            # Create database export directory
+            # Upload schemas for Text-to-SQL
+            Upload-SchemaToApi -DbConfig $dbConfig -Tables $tables -Connection $connection -CloudflareConfig $script:Config.cloudflare
+            
+            # Check if Neon/PostgreSQL sync is enabled
+            $usePostgres = $script:Config.neon -and $script:Config.neon.enabled
+            
+            if ($usePostgres) {
+                Write-Log "PostgreSQL sync enabled - syncing to Neon database" -Level Info
+            }
+            
+            # Create database export directory (for R2 backup)
             $dbExportPath = Join-Path $script:Config.sync.exportPath $dbConfig.name
             if (-not (Test-Path $dbExportPath)) {
                 New-Item -ItemType Directory -Path $dbExportPath -Force | Out-Null
@@ -752,7 +1084,22 @@ function Start-Sync {
                         continue
                     }
                     
-                    # Export to chunks
+                    # Sync to PostgreSQL if enabled
+                    if ($usePostgres) {
+                        $pgSuccess = Sync-TableToPostgres `
+                            -TableInfo $tableInfo `
+                            -Columns $columns `
+                            -DbConfig $dbConfig `
+                            -Connection $connection `
+                            -CloudflareConfig $script:Config.cloudflare
+                        
+                        if ($pgSuccess) {
+                            $script:Stats.TablesProcessed++
+                        }
+                        continue
+                    }
+                    
+                    # Export to chunks (R2 fallback)
                     $chunks = Export-TableToChunks `
                         -Connection $connection `
                         -SchemaName $tableInfo.Schema `

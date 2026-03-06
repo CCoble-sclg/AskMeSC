@@ -2,14 +2,17 @@ export interface Env {
   // D1 Database (index only)
   DB: D1Database;
   
-  // R2 Storage (full data)
+  // R2 Storage (documents and files)
   STORAGE: R2Bucket;
   
-  // Vectorize for embeddings
+  // Vectorize for document embeddings
   VECTORS: VectorizeIndex;
   
   // Workers AI
   AI: Ai;
+  
+  // Neon PostgreSQL connection string
+  NEON_DATABASE_URL: string;
   
   // Environment variables
   ENVIRONMENT: string;
@@ -94,4 +97,60 @@ export interface R2TableMeta {
   primaryKey?: string;
   columns: Array<{ name: string; type: string }>;
   exportedAt: string;
+}
+
+// Schema types for Text-to-SQL
+export interface TableSchema {
+  database: string;
+  schema: string;
+  tableName: string;
+  fullName: string;
+  columns: ColumnSchema[];
+  primaryKey?: string;
+  foreignKeys?: ForeignKey[];
+  rowCount?: number;
+  description?: string;
+}
+
+export interface ColumnSchema {
+  name: string;
+  type: string;
+  postgresType: string;
+  nullable: boolean;
+  isPrimaryKey: boolean;
+  isForeignKey: boolean;
+  referencedTable?: string;
+  description?: string;
+}
+
+export interface ForeignKey {
+  column: string;
+  referencedTable: string;
+  referencedColumn: string;
+}
+
+export interface SchemaUploadRequest {
+  database: string;
+  tables: TableSchema[];
+}
+
+// Query types
+export interface QueryRequest {
+  question: string;
+  database?: string;
+}
+
+export interface QueryResult {
+  sql: string;
+  rows: Record<string, unknown>[];
+  rowCount: number;
+  executionTimeMs: number;
+}
+
+export type QueryType = 'sql' | 'document' | 'hybrid';
+
+export interface QueryRouterResult {
+  type: QueryType;
+  confidence: number;
+  reasoning: string;
 }

@@ -1,8 +1,68 @@
 import { Hono } from 'hono';
-import type { Env, ChatRequest, ChatResponse, Source } from '../types';
+import type { Env, ChatRequest, ChatResponse, Source, QueryType } from '../types';
 import { RagService } from '../services/rag';
+import { SqlService } from '../services/sql';
+import { SchemaService } from '../services/schema';
 
 export const chatRoutes = new Hono<{ Bindings: Env }>();
+
+const DOCUMENT_KEYWORDS = [
+  'policy', 'policies', 'contract', 'contracts', 'document', 'documents',
+  'agreement', 'handbook', 'manual', 'guideline', 'procedure', 'rule',
+  'regulation', 'bylaw', 'ordinance', 'resolution', 'file', 'pdf'
+];
+
+const SQL_KEYWORDS = [
+  'how many', 'count', 'total', 'sum', 'average', 'list', 'show me',
+  'find', 'search for', 'what are', 'who', 'which', 'when', 'where',
+  'invoices', 'payments', 'vendors', 'employees', 'records', 'transactions',
+  'amount', 'date', 'between', 'greater than', 'less than', 'over', 'under'
+];
+
+function determineQueryType(question: string): { type: QueryType; confidence: number } {
+  const lowerQuestion = question.toLowerCase();
+  
+  let documentScore = 0;
+  let sqlScore = 0;
+  
+  for (const keyword of DOCUMENT_KEYWORDS) {
+    if (lowerQuestion.includes(keyword)) {
+      documentScore += 2;
+    }
+  }
+  
+  for (const keyword of SQL_KEYWORDS) {
+    if (lowerQuestion.includes(keyword)) {
+      sqlScore += 1;
+    }
+  }
+  
+  if (lowerQuestion.includes('?') && (
+    lowerQuestion.startsWith('what does') ||
+    lowerQuestion.startsWith('what is our') ||
+    lowerQuestion.startsWith('explain')
+  )) {
+    documentScore += 3;
+  }
+  
+  if (/\d+/.test(question) || 
+      lowerQuestion.includes('$') ||
+      lowerQuestion.includes('between') ||
+      lowerQuestion.includes('from') && lowerQuestion.includes('to')) {
+    sqlScore += 2;
+  }
+  
+  const total = documentScore + sqlScore;
+  if (total === 0) {
+    return { type: 'sql', confidence: 0.5 };
+  }
+  
+  if (documentScore > sqlScore) {
+    return { type: 'document', confidence: documentScore / total };
+  }
+  
+  return { type: 'sql', confidence: sqlScore / total };
+}
 
 chatRoutes.post('/', async (c) => {
   const body = await c.req.json<ChatRequest>();
@@ -20,17 +80,41 @@ chatRoutes.post('/', async (c) => {
     return c.json({ error: 'Message too long (max 2000 characters)' }, 400);
   }
 
-  const rag = new RagService(c.env);
+  const conversationId = body.conversationId || crypto.randomUUID();
   
   try {
-    // Generate conversation ID if not provided
-    const conversationId = body.conversationId || crypto.randomUUID();
-
-    // Run RAG pipeline
+    const { type: queryType, confidence } = determineQueryType(message);
+    console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)})`);
+    
+    if (queryType === 'sql' && c.env.NEON_DATABASE_URL) {
+      try {
+        const sqlService = new SqlService(c.env);
+        const { result, generatedSql } = await sqlService.queryWithNaturalLanguage(
+          message,
+          body.filters?.database
+        );
+        
+        const response = await sqlService.generateResponse(message, result, generatedSql);
+        
+        const chatResponse: ChatResponse = {
+          response,
+          sources: [{
+            table: 'SQL Query',
+            id: 'generated',
+            snippet: generatedSql,
+            score: confidence,
+          }],
+          conversationId,
+        };
+        
+        return c.json(chatResponse);
+      } catch (sqlError) {
+        console.error('SQL query failed, falling back to document search:', sqlError);
+      }
+    }
+    
+    const rag = new RagService(c.env);
     const { response, sources } = await rag.query(message);
-
-    // Optionally store conversation for context (future enhancement)
-    // await storeConversation(c.env.DB, conversationId, message, response);
 
     const result: ChatResponse = {
       response,

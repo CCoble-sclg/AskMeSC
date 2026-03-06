@@ -4,6 +4,10 @@
     "syncApiKey": "YOUR_SYNC_API_KEY",
     "accountId": "YOUR_CLOUDFLARE_ACCOUNT_ID"
   },
+  "neon": {
+    "enabled": true,
+    "connectionString": "postgresql://user:password@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require"
+  },
   "databases": [
     {
       "name": "MyDatabase",
