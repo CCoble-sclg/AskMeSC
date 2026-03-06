@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import type { Env, QueryResult, TableSchema } from '../types';
+import type { Env, QueryResult, TableSchema, ChartData } from '../types';
 import { SchemaService } from './schema';
 
 const MAX_ROWS = 100;
@@ -202,12 +202,138 @@ SQL query:`;
     return parts.join('\n');
   }
 
+  formatResultsAsMarkdownTable(result: QueryResult, maxRows: number = 15): string {
+    if (result.rowCount === 0 || result.rows.length === 0) {
+      return '';
+    }
+
+    const columns = Object.keys(result.rows[0]);
+    if (columns.length === 0) return '';
+
+    const formatValue = (val: unknown): string => {
+      if (val === null || val === undefined) return '-';
+      if (typeof val === 'number') {
+        if (Number.isInteger(val)) return val.toLocaleString();
+        return val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+      if (val instanceof Date) return val.toLocaleDateString();
+      const str = String(val);
+      return str.length > 50 ? str.substring(0, 47) + '...' : str;
+    };
+
+    const formatHeader = (col: string): string => {
+      return col.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim();
+    };
+
+    const header = '| ' + columns.map(formatHeader).join(' | ') + ' |';
+    const separator = '| ' + columns.map(() => '---').join(' | ') + ' |';
+    
+    const rows = result.rows.slice(0, maxRows).map(row => {
+      return '| ' + columns.map(col => formatValue(row[col])).join(' | ') + ' |';
+    });
+
+    let table = [header, separator, ...rows].join('\n');
+    
+    if (result.rowCount > maxRows) {
+      table += `\n\n*Showing ${maxRows} of ${result.rowCount} results*`;
+    }
+
+    return table;
+  }
+
+  detectChartType(question: string, result: QueryResult): { shouldChart: boolean; type?: ChartData['type']; title?: string } {
+    const lowerQ = question.toLowerCase();
+    
+    if (result.rowCount < 2 || result.rowCount > 20) {
+      return { shouldChart: false };
+    }
+
+    const columns = Object.keys(result.rows[0]);
+    const hasNumericColumn = result.rows.some(row => 
+      columns.some(col => typeof row[col] === 'number' || !isNaN(Number(row[col])))
+    );
+
+    if (!hasNumericColumn) {
+      return { shouldChart: false };
+    }
+
+    if (lowerQ.includes('by month') || lowerQ.includes('over time') || lowerQ.includes('trend') || lowerQ.includes('per month')) {
+      return { shouldChart: true, type: 'line', title: 'Trend Over Time' };
+    }
+
+    if (lowerQ.includes('breakdown') || lowerQ.includes('distribution') || lowerQ.includes('percentage') || lowerQ.includes('share')) {
+      return { shouldChart: true, type: 'pie', title: 'Distribution' };
+    }
+
+    if (lowerQ.includes('top') || lowerQ.includes('most') || lowerQ.includes('compare') || lowerQ.includes('by vendor') || lowerQ.includes('by department')) {
+      return { shouldChart: true, type: 'bar', title: 'Comparison' };
+    }
+
+    if (lowerQ.includes('count') || lowerQ.includes('how many') || lowerQ.includes('total')) {
+      if (result.rowCount > 1) {
+        return { shouldChart: true, type: 'bar', title: 'Summary' };
+      }
+    }
+
+    return { shouldChart: false };
+  }
+
+  generateChartData(result: QueryResult, chartType: ChartData['type'], title?: string): ChartData | undefined {
+    if (result.rowCount === 0 || result.rows.length === 0) return undefined;
+
+    const columns = Object.keys(result.rows[0]);
+    
+    let labelColumn = columns.find(c => 
+      typeof result.rows[0][c] === 'string' || 
+      c.toLowerCase().includes('name') || 
+      c.toLowerCase().includes('vendor') ||
+      c.toLowerCase().includes('month') ||
+      c.toLowerCase().includes('department')
+    ) || columns[0];
+
+    let valueColumn = columns.find(c => {
+      const val = result.rows[0][c];
+      return (typeof val === 'number' || !isNaN(Number(val))) && c !== labelColumn;
+    });
+
+    if (!valueColumn) {
+      const countCol = columns.find(c => c.toLowerCase().includes('count') || c.toLowerCase().includes('total') || c.toLowerCase().includes('sum'));
+      if (countCol) valueColumn = countCol;
+    }
+
+    if (!valueColumn) return undefined;
+
+    const labels = result.rows.map(row => String(row[labelColumn] || 'Unknown'));
+    const data = result.rows.map(row => {
+      const val = row[valueColumn!];
+      return typeof val === 'number' ? val : Number(val) || 0;
+    });
+
+    return {
+      type: chartType,
+      title,
+      labels,
+      datasets: [{
+        label: valueColumn.replace(/([A-Z])/g, ' $1').trim(),
+        data,
+      }],
+    };
+  }
+
   async generateResponse(
     question: string,
     queryResult: QueryResult,
     generatedSql: string
-  ): Promise<string> {
+  ): Promise<{ text: string; chart?: ChartData }> {
     const resultContext = this.formatResultsForLLM(queryResult);
+    const markdownTable = this.formatResultsAsMarkdownTable(queryResult);
+    
+    const chartInfo = this.detectChartType(question, queryResult);
+    let chart: ChartData | undefined;
+    
+    if (chartInfo.shouldChart && chartInfo.type) {
+      chart = this.generateChartData(queryResult, chartInfo.type, chartInfo.title);
+    }
 
     const prompt = `You are a helpful assistant answering questions about local government data.
 
@@ -218,7 +344,13 @@ I ran this SQL query: ${generatedSql}
 Query results:
 ${resultContext}
 
-Please provide a clear, helpful answer based on these results. If there are many results, summarize the key findings. Use plain language that citizens can understand.`;
+Instructions:
+- Provide a clear, helpful answer based on these results
+- Start with a brief summary of the key finding
+- Use **bold** for important numbers
+- If there are multiple results, the data will be shown in a table below your answer
+- Use plain language that citizens can understand
+- Keep the response concise (2-4 sentences for simple queries)`;
 
     const aiResponse = await this.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
       messages: [
@@ -227,8 +359,14 @@ Please provide a clear, helpful answer based on these results. If there are many
       max_tokens: 1024,
     });
 
-    return 'response' in aiResponse 
+    let text = 'response' in aiResponse 
       ? aiResponse.response || 'Unable to generate response'
       : 'Unable to generate response';
+
+    if (markdownTable && queryResult.rowCount > 1) {
+      text += '\n\n' + markdownTable;
+    }
+
+    return { text, chart };
   }
 }

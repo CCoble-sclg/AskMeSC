@@ -43,6 +43,7 @@
         role: 'assistant',
         content: response.response,
         sources: response.sources,
+        chart: response.chart,
         timestamp: new Date(),
       };
       messages = [...messages, assistantMessage];

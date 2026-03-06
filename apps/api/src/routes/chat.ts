@@ -86,7 +86,7 @@ chatRoutes.post('/', async (c) => {
     const { type: queryType, confidence } = determineQueryType(message);
     console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)})`);
     
-    if (queryType === 'sql' && c.env.NEON_DATABASE_URL) {
+      if (queryType === 'sql' && c.env.NEON_DATABASE_URL) {
       console.log('Attempting SQL query path...');
       try {
         const sqlService = new SqlService(c.env);
@@ -98,16 +98,17 @@ chatRoutes.post('/', async (c) => {
         console.log(`SQL generated: ${generatedSql}`);
         console.log(`Query returned ${result.rowCount} rows`);
         
-        const response = await sqlService.generateResponse(message, result, generatedSql);
+        const { text, chart } = await sqlService.generateResponse(message, result, generatedSql);
         
         const chatResponse: ChatResponse = {
-          response,
+          response: text,
           sources: [{
             table: 'SQL Query',
             id: 'generated',
             snippet: generatedSql,
             score: confidence,
           }],
+          chart,
           conversationId,
         };
         

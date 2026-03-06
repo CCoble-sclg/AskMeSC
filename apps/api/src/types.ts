@@ -36,7 +36,22 @@ export interface ChatRequest {
 export interface ChatResponse {
   response: string;
   sources?: Source[];
+  chart?: ChartData;
   conversationId: string;
+}
+
+export interface ChartData {
+  type: 'bar' | 'line' | 'pie' | 'doughnut';
+  title?: string;
+  labels: string[];
+  datasets: ChartDataset[];
+}
+
+export interface ChartDataset {
+  label: string;
+  data: number[];
+  backgroundColor?: string | string[];
+  borderColor?: string | string[];
 }
 
 export interface Source {
