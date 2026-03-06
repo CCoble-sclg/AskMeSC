@@ -619,8 +619,17 @@ function Request-EmbeddingGeneration {
     }
     
     try {
-        $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -TimeoutSec 300
+        # Short timeout - if embedding takes too long, continue anyway
+        $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -TimeoutSec 30
         return $response
+    }
+    catch [System.Net.WebException] {
+        if ($_.Exception.Status -eq 'Timeout') {
+            Write-Log "      Embedding request timed out (will process in background)" -Level Warning
+            return @{ queued = $true }
+        }
+        Write-Log "      Failed to generate embeddings: $_" -Level Warning
+        return $null
     }
     catch {
         Write-Log "      Failed to generate embeddings: $_" -Level Warning
