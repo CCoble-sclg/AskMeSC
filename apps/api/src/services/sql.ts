@@ -336,16 +336,9 @@ SQL query:`;
     question: string,
     queryResult: QueryResult,
     generatedSql: string
-  ): Promise<{ text: string; chart?: ChartData }> {
+  ): Promise<{ text: string }> {
     const resultContext = this.formatResultsForLLM(queryResult);
     const markdownTable = this.formatResultsAsMarkdownTable(queryResult);
-    
-    const chartInfo = this.detectChartType(question, queryResult);
-    let chart: ChartData | undefined;
-    
-    if (chartInfo.shouldChart && chartInfo.type) {
-      chart = this.generateChartData(queryResult, chartInfo.type, chartInfo.title);
-    }
 
     const prompt = `You are a helpful assistant answering questions about local government data.
 
@@ -357,21 +350,17 @@ Query results:
 ${resultContext}
 
 Instructions:
-- Write ONE brief sentence summarizing the key finding
-- Optionally add ONE more sentence with a notable insight
-- Use **bold** for the most important number
-- NEVER create tables, lists, or bullet points
-- NEVER enumerate individual months or rows
-- A table and chart will be added separately
-- Maximum 2 sentences total`;
+- Provide a clear, helpful answer to the user's question based on the query results
+- Summarize the key findings concisely
+- Use **bold** for important numbers or highlights
+- Do not reproduce the raw data as a table — a formatted table will be appended automatically`;
 
     let text = await this.claude.chat(
-      'You are a helpful assistant answering questions about local government data. Be concise.',
+      'You are a helpful assistant answering questions about local government data.',
       prompt,
       { maxTokens: 1024 }
     ) || 'Unable to generate response';
 
-    // Strip any markdown tables the LLM may have generated (we add our own formatted one)
     const lines = text.split('\n');
     const filteredLines = lines.filter(line => {
       const trimmed = line.trim();
@@ -384,6 +373,6 @@ Instructions:
       text += '\n\n' + markdownTable;
     }
 
-    return { text, chart };
+    return { text };
   }
 }

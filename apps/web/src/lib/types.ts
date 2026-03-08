@@ -3,7 +3,6 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   sources?: Source[];
-  chart?: ChartData;
   timestamp: Date;
   isError?: boolean;
 }
@@ -32,6 +31,5 @@ export interface ChartDataset {
 export interface ChatResponse {
   response: string;
   sources?: Source[];
-  chart?: ChartData;
   conversationId: string;
 }

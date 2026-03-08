@@ -39,7 +39,6 @@ export interface ChatRequest {
 export interface ChatResponse {
   response: string;
   sources?: Source[];
-  chart?: ChartData;
   conversationId: string;
 }
 

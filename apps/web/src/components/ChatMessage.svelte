@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Message } from '$lib/types';
   import MarkdownRenderer from './MarkdownRenderer.svelte';
-  import ChartRenderer from './ChartRenderer.svelte';
 
   let { message }: { message: Message } = $props();
 </script>
@@ -20,10 +19,6 @@
       <MarkdownRenderer content={message.content} />
     {:else}
       <div class="text">{message.content}</div>
-    {/if}
-    
-    {#if message.chart}
-      <ChartRenderer data={message.chart} />
     {/if}
     
     {#if message.sources && message.sources.length > 0}

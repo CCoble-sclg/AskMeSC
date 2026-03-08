@@ -98,7 +98,7 @@ chatRoutes.post('/', async (c) => {
         console.log(`SQL generated: ${generatedSql}`);
         console.log(`Query returned ${result.rowCount} rows`);
         
-        const { text, chart } = await sqlService.generateResponse(message, result, generatedSql);
+        const { text } = await sqlService.generateResponse(message, result, generatedSql);
         
         const chatResponse: ChatResponse = {
           response: text,
@@ -108,7 +108,6 @@ chatRoutes.post('/', async (c) => {
             snippet: generatedSql,
             score: confidence,
           }],
-          chart,
           conversationId,
         };
         
