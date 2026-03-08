@@ -1,6 +1,7 @@
 name = "askmesc-api"
 main = "src/index.ts"
 compatibility_date = "2024-12-30"
+account_id = "b7680574a286abd8f82bbb70e52d9684"
 
 # D1 Database binding
 [[d1_databases]]
@@ -29,6 +30,7 @@ ENVIRONMENT = "development"
 # Required secrets (set via wrangler secret put):
 # - SYNC_API_KEY: API key for sync service authentication
 # - NEON_DATABASE_URL: PostgreSQL connection string from Neon
+# - ANTHROPIC_API_KEY: Anthropic Claude API key for LLM generation
 
 # Rate limiting
 # [[unsafe.bindings]]

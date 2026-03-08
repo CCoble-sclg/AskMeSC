@@ -8,8 +8,11 @@ export interface Env {
   // Vectorize for document embeddings
   VECTORS: VectorizeIndex;
   
-  // Workers AI
+  // Workers AI (used for embeddings only)
   AI: Ai;
+  
+  // Anthropic Claude API key (used for LLM generation)
+  ANTHROPIC_API_KEY: string;
   
   // Neon PostgreSQL connection string
   NEON_DATABASE_URL: string;

@@ -1,5 +1,6 @@
 import type { Env, Source } from '../types';
 import { EmbeddingService } from './embedding';
+import { ClaudeService } from './claude';
 
 const SYSTEM_PROMPT = `You are a helpful assistant for citizens asking questions about local government services and public records.
 
@@ -27,10 +28,12 @@ interface R2ChunkData {
 export class RagService {
   private env: Env;
   private embedService: EmbeddingService;
+  private claude: ClaudeService;
 
   constructor(env: Env) {
     this.env = env;
     this.embedService = new EmbeddingService(env);
+    this.claude = new ClaudeService(env.ANTHROPIC_API_KEY);
   }
 
   async query(question: string): Promise<{ response: string; sources: Source[] }> {
@@ -91,17 +94,11 @@ export class RagService {
       };
     }
 
-    const aiResponse = await this.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT + context },
-        { role: 'user', content: question },
-      ],
-      max_tokens: 1024,
-    });
-
-    const response = 'response' in aiResponse 
-      ? aiResponse.response 
-      : 'I apologize, but I was unable to generate a response.';
+    const response = await this.claude.chat(
+      SYSTEM_PROMPT + context,
+      question,
+      { maxTokens: 1024 }
+    );
 
     return {
       response: response || 'No response generated',
@@ -145,16 +142,11 @@ export class RagService {
 
     const context = contextParts.join('\n\n---\n\n');
 
-    const stream = await this.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT + context },
-        { role: 'user', content: question },
-      ],
-      stream: true,
-      max_tokens: 1024,
-    });
-
-    return stream as unknown as ReadableStream;
+    return this.claude.chatStream(
+      SYSTEM_PROMPT + context,
+      question,
+      { maxTokens: 1024 }
+    );
   }
 
   private async fetchRecordFromR2(

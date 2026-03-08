@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 import type { Env, QueryResult, TableSchema, ChartData } from '../types';
 import { SchemaService } from './schema';
+import { ClaudeService } from './claude';
 
 const MAX_ROWS = 100;
 const QUERY_TIMEOUT_MS = 5000;
@@ -14,10 +15,12 @@ const DANGEROUS_KEYWORDS = [
 export class SqlService {
   private env: Env;
   private schemaService: SchemaService;
+  private claude: ClaudeService;
 
   constructor(env: Env) {
     this.env = env;
     this.schemaService = new SchemaService(env);
+    this.claude = new ClaudeService(env.ANTHROPIC_API_KEY);
   }
 
   extractKeywords(question: string): string[] {
@@ -95,15 +98,11 @@ User question: ${question}
 
 SQL query:`;
 
-    const aiResponse = await this.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
-      messages: [
-        { role: 'user', content: prompt }
-      ],
-      max_tokens: 500,
-      temperature: 0.1,
-    });
-
-    const response = 'response' in aiResponse ? aiResponse.response : '';
+    const response = await this.claude.chat(
+      'You are a SQL expert. Return ONLY the SQL query with no explanation, markdown, or commentary.',
+      prompt,
+      { maxTokens: 500, temperature: 0 }
+    );
     
     let sql = response?.trim() || '';
     sql = sql.replace(/```sql\n?/gi, '').replace(/```\n?/g, '').trim();
@@ -366,16 +365,11 @@ Instructions:
 - A table and chart will be added separately
 - Maximum 2 sentences total`;
 
-    const aiResponse = await this.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
-      messages: [
-        { role: 'user', content: prompt }
-      ],
-      max_tokens: 1024,
-    });
-
-    let text = 'response' in aiResponse 
-      ? aiResponse.response || 'Unable to generate response'
-      : 'Unable to generate response';
+    let text = await this.claude.chat(
+      'You are a helpful assistant answering questions about local government data. Be concise.',
+      prompt,
+      { maxTokens: 1024 }
+    ) || 'Unable to generate response';
 
     // Strip any markdown tables the LLM may have generated (we add our own formatted one)
     const lines = text.split('\n');
