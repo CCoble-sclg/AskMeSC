@@ -16,6 +16,7 @@
     "mssql": "^10.0.0"
   },
   "devDependencies": {
+    "@types/mssql": "^9.1.9",
     "@types/node": "^20.0.0",
     "azure-functions-core-tools": "^4.0.0",
     "rimraf": "^5.0.0",
