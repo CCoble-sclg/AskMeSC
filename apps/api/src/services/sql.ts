@@ -73,9 +73,21 @@ export class SqlService {
     const keywords = this.extractKeywords(question);
     const schemaContext = await this.schemaService.getSchemaContext(database, keywords);
     
+    // Check if this is a follow-up question with context
+    const isFollowUp = question.includes('Previous question:');
+    
     const prompt = `You are a SQL analytics expert. Generate a Microsoft SQL Server (T-SQL) query to provide INSIGHTFUL analysis for the user's question.
 
-ANALYTICAL MINDSET (IMPORTANT):
+${isFollowUp ? `FOLLOW-UP QUESTION HANDLING:
+- This is a follow-up to a previous query. Use the previous SQL as a starting point.
+- If the user says something is "too high/low" or "wrong", consider:
+  - Using a different table (e.g., animal table instead of kennel for unique animals)
+  - Adding filters or different groupings
+  - Checking for duplicates or historical records
+- If asked to "break down" or add detail, add GROUP BY clauses
+- Maintain relevance to the original question while addressing the follow-up
+
+` : ''}ANALYTICAL MINDSET (IMPORTANT):
 - Think like a data analyst - what insights would be most valuable?
 - For time-based questions (last month, this year, etc.), consider:
   - Group by week or day to show trends

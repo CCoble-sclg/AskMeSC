@@ -6,6 +6,17 @@ import { SchemaService } from '../services/schema';
 
 export const chatRoutes = new Hono<{ Bindings: Env }>();
 
+interface ConversationContext {
+  lastQueryType: 'sql' | 'document';
+  lastSql?: string;
+  lastQuestion?: string;
+  lastResultSummary?: string;
+  timestamp: number;
+}
+
+const conversationCache = new Map<string, ConversationContext>();
+const CONTEXT_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
+
 const DOCUMENT_KEYWORDS = [
   'policy', 'policies', 'contract', 'contracts', 'document', 'documents',
   'agreement', 'handbook', 'manual', 'guideline', 'procedure', 'rule',
@@ -23,8 +34,46 @@ const SQL_KEYWORDS = [
   'database', 'db', 'table', 'tables', 'data'
 ];
 
-function determineQueryType(question: string): { type: QueryType; confidence: number } {
+const FOLLOWUP_INDICATORS = [
+  'that', 'this', 'those', 'these', 'it', 'they', 'the count', 'the number',
+  'break it down', 'break that down', 'more detail', 'why', 'explain',
+  'too high', 'too low', 'wrong', 'incorrect', 'not right',
+  'by week', 'by month', 'by day', 'by type', 'by category',
+  'filter', 'only', 'exclude', 'just the', 'instead'
+];
+
+function isFollowUpQuestion(question: string, context: ConversationContext | undefined): boolean {
+  if (!context || Date.now() - context.timestamp > CONTEXT_EXPIRY_MS) {
+    return false;
+  }
+  
   const lowerQuestion = question.toLowerCase();
+  
+  // Short questions are often follow-ups
+  if (question.split(' ').length <= 6) {
+    for (const indicator of FOLLOWUP_INDICATORS) {
+      if (lowerQuestion.includes(indicator)) {
+        return true;
+      }
+    }
+  }
+  
+  // Starts with follow-up words
+  if (/^(but|and|also|what about|can you|could you|why|how about)/i.test(lowerQuestion)) {
+    return true;
+  }
+  
+  return false;
+}
+
+function determineQueryType(question: string, context?: ConversationContext): { type: QueryType; confidence: number } {
+  const lowerQuestion = question.toLowerCase();
+  
+  // If this is a follow-up to a SQL query, keep it as SQL
+  if (context?.lastQueryType === 'sql' && isFollowUpQuestion(question, context)) {
+    console.log('Detected follow-up to SQL query, maintaining SQL path');
+    return { type: 'sql', confidence: 0.9 };
+  }
   
   let documentScore = 0;
   let sqlScore = 0;
@@ -86,23 +135,51 @@ chatRoutes.post('/', async (c) => {
 
   const conversationId = body.conversationId || crypto.randomUUID();
   
+  // Get previous conversation context
+  const previousContext = conversationCache.get(conversationId);
+  
   try {
-    const { type: queryType, confidence } = determineQueryType(message);
-    console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)})`);
+    const { type: queryType, confidence } = determineQueryType(message, previousContext);
+    console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)}), hasContext: ${!!previousContext}`);
     
     if (queryType === 'sql' && c.env.AZURE_FUNCTION_URL) {
       console.log('Attempting Azure SQL query path via Function proxy...');
       try {
         const sqlService = new SqlService(c.env);
         console.log('SqlService created, calling queryWithNaturalLanguage...');
+        
+        // Build context string for follow-up questions
+        let contextualMessage = message;
+        if (previousContext && isFollowUpQuestion(message, previousContext)) {
+          contextualMessage = `Previous question: "${previousContext.lastQuestion}"
+Previous SQL: ${previousContext.lastSql}
+Previous result summary: ${previousContext.lastResultSummary}
+
+Follow-up question: ${message}`;
+          console.log('Using conversation context for follow-up question');
+        }
+        
         const { result, generatedSql } = await sqlService.queryWithNaturalLanguage(
-          message,
+          contextualMessage,
           body.filters?.database
         );
         console.log(`SQL generated: ${generatedSql}`);
         console.log(`Query returned ${result.rowCount} rows`);
         
         const { text } = await sqlService.generateResponse(message, result, generatedSql);
+        
+        // Save context for follow-up questions
+        const resultSummary = result.rowCount === 1 
+          ? JSON.stringify(result.rows[0])
+          : `${result.rowCount} rows returned`;
+        
+        conversationCache.set(conversationId, {
+          lastQueryType: 'sql',
+          lastSql: generatedSql,
+          lastQuestion: message,
+          lastResultSummary: resultSummary,
+          timestamp: Date.now(),
+        });
         
         const chatResponse: ChatResponse = {
           response: text,
@@ -126,6 +203,13 @@ chatRoutes.post('/', async (c) => {
     
     const rag = new RagService(c.env);
     const { response, sources } = await rag.query(message);
+
+    // Save context for document queries too
+    conversationCache.set(conversationId, {
+      lastQueryType: 'document',
+      lastQuestion: message,
+      timestamp: Date.now(),
+    });
 
     const result: ChatResponse = {
       response,
