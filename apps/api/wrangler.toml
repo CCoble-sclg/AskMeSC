@@ -29,8 +29,9 @@ ENVIRONMENT = "development"
 
 # Required secrets (set via wrangler secret put):
 # - SYNC_API_KEY: API key for sync service authentication
-# - NEON_DATABASE_URL: PostgreSQL connection string from Neon
 # - ANTHROPIC_API_KEY: Anthropic Claude API key for LLM generation
+# - AZURE_FUNCTION_URL: URL of the Azure Function SQL proxy
+# - AZURE_FUNCTION_KEY: API key for the Azure Function
 
 # Rate limiting
 # [[unsafe.bindings]]

@@ -1,16 +1,22 @@
-import { neon } from '@neondatabase/serverless';
-import type { Env, QueryResult, TableSchema, ChartData } from '../types';
+import type { Env, QueryResult, ChartData } from '../types';
 import { SchemaService } from './schema';
 import { ClaudeService } from './claude';
 
 const MAX_ROWS = 100;
-const QUERY_TIMEOUT_MS = 5000;
 
 const DANGEROUS_KEYWORDS = [
   'INSERT', 'UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER',
   'CREATE', 'GRANT', 'REVOKE', 'EXEC', 'EXECUTE', 'CALL',
   'INTO', 'SET', 'MERGE'
 ];
+
+interface AzureFunctionResponse {
+  rows: Record<string, unknown>[];
+  rowCount: number;
+  executionTimeMs: number;
+  error?: string;
+  details?: string;
+}
 
 export class SqlService {
   private env: Env;
@@ -49,7 +55,8 @@ export class SqlService {
     const uniqueWords = [...new Set(words)];
     
     const entityKeywords = ['invoice', 'vendor', 'employee', 'payment', 'check', 
-      'account', 'department', 'batch', 'item', 'transaction', 'payable', 'receivable'];
+      'account', 'department', 'batch', 'item', 'transaction', 'payable', 'receivable',
+      'animal', 'license', 'permit', 'owner', 'dog', 'cat', 'pet'];
     
     const prioritized = uniqueWords.sort((a, b) => {
       const aIsEntity = entityKeywords.some(e => a.includes(e) || e.includes(a));
@@ -66,28 +73,27 @@ export class SqlService {
     const keywords = this.extractKeywords(question);
     const schemaContext = await this.schemaService.getSchemaContext(database, keywords);
     
-    const prompt = `You are a SQL expert. Generate a PostgreSQL query to answer the user's question.
+    const prompt = `You are a SQL expert. Generate a Microsoft SQL Server (T-SQL) query to answer the user's question.
 
 RULES:
 - Generate ONLY a SELECT query - no INSERT, UPDATE, DELETE, or DDL
-- Always include LIMIT ${MAX_ROWS} at the end
-- CRITICAL: Always use double quotes around table names exactly as shown (e.g., FROM "dbo_AccountsPayableInvoice")
-- CRITICAL: Always use double quotes around column names exactly as shown (e.g., SELECT "InvoiceDate")
-- Use ILIKE only for TEXT/VARCHAR columns, never for dates or numbers
-- For date filtering, use operators like >=, <=, BETWEEN with proper date literals (e.g., "InvoiceDate" >= '2023-01-01')
-- For year filtering, use: EXTRACT(YEAR FROM "DateColumn") = 2023
+- Use TOP ${MAX_ROWS} after SELECT (e.g., SELECT TOP ${MAX_ROWS} ...)
+- CRITICAL: Use square brackets for table names exactly as shown (e.g., FROM [dbo].[TableName])
+- CRITICAL: Use square brackets for column names exactly as shown (e.g., SELECT [ColumnName])
+- For case-insensitive text search, use LIKE (SQL Server is case-insensitive by default)
+- For date filtering, use operators like >=, <=, BETWEEN with proper date literals (e.g., [DateColumn] >= '2023-01-01')
+- For year filtering, use: YEAR([DateColumn]) = 2023
 
 AGGREGATION RULES (IMPORTANT):
-- When user asks for data "by month", use: TO_CHAR("DateColumn", 'YYYY-MM') AS month, COUNT(*) or SUM() with GROUP BY
-- When user asks for data "by vendor", "by department", etc., use GROUP BY on that column with COUNT(*) or SUM()
+- When user asks for data "by month", use: FORMAT([DateColumn], 'yyyy-MM') AS month, COUNT(*) or SUM() with GROUP BY
+- When user asks for data "by vendor", "by owner", etc., use GROUP BY on that column with COUNT(*) or SUM()
 - When user asks "how many" or "total", use COUNT(*) or SUM() as appropriate
 - For "by month" queries, always ORDER BY the month column
 
 YEAR FILTERING (CRITICAL):
 - When user asks for a specific year like "for 2024" or "in 2024", ALWAYS filter to ONLY that year
-- Use: WHERE EXTRACT(YEAR FROM "DateColumn") = 2024
+- Use: WHERE YEAR([DateColumn]) = 2024
 - DO NOT use >= '2024-01-01' alone - this includes future years!
-- For "invoices by month for 2024": WHERE EXTRACT(YEAR FROM "InvoiceDate") = 2024
 
 - Return ONLY the SQL query, no explanation or markdown
 - If you cannot answer with a SELECT query, return: SELECT 'Cannot generate query for this request' AS error
@@ -104,18 +110,19 @@ SQL query:`;
       { maxTokens: 500, temperature: 0 }
     );
     
-    let sql = response?.trim() || '';
-    sql = sql.replace(/```sql\n?/gi, '').replace(/```\n?/g, '').trim();
+    let sqlQuery = response?.trim() || '';
+    sqlQuery = sqlQuery.replace(/```sql\n?/gi, '').replace(/```\n?/g, '').trim();
     
-    if (!sql.toUpperCase().includes('LIMIT')) {
-      sql = sql.replace(/;?\s*$/, '') + ` LIMIT ${MAX_ROWS}`;
+    // Ensure TOP clause exists
+    if (!sqlQuery.toUpperCase().includes('TOP ')) {
+      sqlQuery = sqlQuery.replace(/^SELECT\s+/i, `SELECT TOP ${MAX_ROWS} `);
     }
 
-    return sql;
+    return sqlQuery;
   }
 
-  validateQuery(sql: string): { valid: boolean; error?: string } {
-    const upperSql = sql.toUpperCase();
+  validateQuery(sqlQuery: string): { valid: boolean; error?: string } {
+    const upperSql = sqlQuery.toUpperCase();
 
     for (const keyword of DANGEROUS_KEYWORDS) {
       const regex = new RegExp(`\\b${keyword}\\b`, 'i');
@@ -140,36 +147,52 @@ SQL query:`;
     return { valid: true };
   }
 
-  async executeQuery(sql: string): Promise<QueryResult> {
-    const validation = this.validateQuery(sql);
+  async executeQuery(sqlQuery: string, database: string = 'Animal'): Promise<QueryResult> {
+    const validation = this.validateQuery(sqlQuery);
     if (!validation.valid) {
       throw new Error(validation.error);
     }
 
-    const connectionString = this.env.NEON_DATABASE_URL;
-    if (!connectionString) {
-      throw new Error('Database connection not configured');
+    const functionUrl = this.env.AZURE_FUNCTION_URL;
+    const apiKey = this.env.AZURE_FUNCTION_KEY;
+    
+    if (!functionUrl || !apiKey) {
+      throw new Error('Azure Function not configured');
     }
 
-    const neonSql = neon(connectionString);
-    
     const startTime = Date.now();
     
     try {
-      console.log('Executing SQL:', sql);
-      const result = await neonSql.query(sql);
-      const executionTimeMs = Date.now() - startTime;
+      console.log('Executing SQL via Azure Function:', sqlQuery);
       
-      const resultRows = Array.isArray(result) ? result : (result.rows || []);
-      console.log(`Query returned ${resultRows.length} rows`);
+      const response = await fetch(`${functionUrl}/api/query`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          database,
+          query: sqlQuery,
+        }),
+      });
+
+      const result: AzureFunctionResponse = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+
+      console.log(`Query returned ${result.rowCount} rows in ${result.executionTimeMs}ms`);
 
       return {
-        sql,
-        rows: resultRows as Record<string, unknown>[],
-        rowCount: resultRows.length,
-        executionTimeMs,
+        sql: sqlQuery,
+        rows: result.rows,
+        rowCount: result.rowCount,
+        executionTimeMs: result.executionTimeMs,
       };
     } catch (error) {
+      console.error('Query execution error:', error);
       throw new Error(`Query execution failed: ${error}`);
     }
   }
@@ -178,15 +201,15 @@ SQL query:`;
     question: string, 
     database?: string
   ): Promise<{ result: QueryResult; generatedSql: string }> {
-    const sql = await this.generateSql(question, database);
+    const sqlQuery = await this.generateSql(question, database);
     
-    if (sql.includes("Cannot generate query")) {
+    if (sqlQuery.includes("Cannot generate query")) {
       throw new Error('Unable to generate a valid query for this question');
     }
 
-    const result = await this.executeQuery(sql);
+    const result = await this.executeQuery(sqlQuery, database || 'Animal');
     
-    return { result, generatedSql: sql };
+    return { result, generatedSql: sqlQuery };
   }
 
   formatResultsForLLM(result: QueryResult): string {

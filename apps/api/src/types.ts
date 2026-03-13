@@ -14,8 +14,12 @@ export interface Env {
   // Anthropic Claude API key (used for LLM generation)
   ANTHROPIC_API_KEY: string;
   
-  // Neon PostgreSQL connection string
-  NEON_DATABASE_URL: string;
+  // Azure Function SQL Proxy
+  AZURE_FUNCTION_URL: string;
+  AZURE_FUNCTION_KEY: string;
+  
+  // Legacy: Neon PostgreSQL connection string (deprecated)
+  NEON_DATABASE_URL?: string;
   
   // Environment variables
   ENVIRONMENT: string;

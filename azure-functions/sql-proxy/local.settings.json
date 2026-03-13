@@ -1,0 +1,12 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "API_KEY": "your-secret-api-key-here",
+    "DB_ANIMAL_SERVER": "sclg-askmesc.database.windows.net",
+    "DB_ANIMAL_DATABASE": "Animal",
+    "DB_ANIMAL_USER": "sclg-store-sql-admin",
+    "DB_ANIMAL_PASSWORD": "your-password-here"
+  }
+}

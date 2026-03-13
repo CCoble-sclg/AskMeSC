@@ -86,8 +86,8 @@ chatRoutes.post('/', async (c) => {
     const { type: queryType, confidence } = determineQueryType(message);
     console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)})`);
     
-      if (queryType === 'sql' && c.env.NEON_DATABASE_URL) {
-      console.log('Attempting SQL query path...');
+    if (queryType === 'sql' && c.env.AZURE_FUNCTION_URL) {
+      console.log('Attempting Azure SQL query path via Function proxy...');
       try {
         const sqlService = new SqlService(c.env);
         console.log('SqlService created, calling queryWithNaturalLanguage...');
@@ -117,7 +117,7 @@ chatRoutes.post('/', async (c) => {
         console.error('Error details:', String(sqlError));
       }
     } else {
-      console.log(`Skipping SQL: queryType=${queryType}, hasNeonUrl=${!!c.env.NEON_DATABASE_URL}`);
+      console.log(`Skipping SQL: queryType=${queryType}, hasAzureFunction=${!!c.env.AZURE_FUNCTION_URL}`);
     }
     
     const rag = new RagService(c.env);
