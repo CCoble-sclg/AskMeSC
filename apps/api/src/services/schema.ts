@@ -113,62 +113,73 @@ export class SchemaService {
       .map(s => s.schema);
   }
 
-  async getSchemasInNeon(): Promise<TableSchema[]> {
-    const neonTables = [
-      'dbo.Account', 'dbo.AccountBillingItems', 'dbo.AccountGASB', 'dbo.AccountGASBTemp',
-      'dbo.AccountsPayableBatch', 'dbo.AccountsPayableImportInvoice', 
-      'dbo.AccountsPayableImportInvoiceItem', 'dbo.AccountsPayableImportInvoiceItemGLDistribution',
-      'dbo.AccountsPayableInvoice', 'dbo.AccountsPayableInvoiceCheck', 'dbo.AccountsPayableInvoiceItem',
-      'APP.DatabaseHotfixes'
-    ];
-    
-    const allSchemas = await this.getAllSchemas();
-    console.log(`getAllSchemas returned ${allSchemas.length} schemas`);
-    const filtered = allSchemas.filter(s => neonTables.includes(s.fullName));
-    console.log(`After filtering for Neon tables: ${filtered.length} schemas`);
-    if (filtered.length === 0 && allSchemas.length > 0) {
-      console.log('Sample fullNames:', allSchemas.slice(0, 5).map(s => s.fullName));
-    }
-    return filtered;
-  }
-
   async getSchemaContext(database?: string, searchTerms?: string[]): Promise<string> {
-    const schemas = await this.getSchemasInNeon();
-    
-    if (schemas.length === 0) {
-      return 'No tables available.';
+    // Fetch schema directly from Azure Function
+    if (!this.env.AZURE_FUNCTION_URL || !this.env.AZURE_FUNCTION_KEY) {
+      return 'Azure Function not configured.';
     }
 
-    const parts: string[] = [];
-    parts.push('Available database tables:\n');
-    parts.push('IMPORTANT: Table names use underscores, not dots (e.g., dbo_TableName not dbo.TableName)\n');
-
-    for (const schema of schemas) {
-      const postgresTableName = schema.fullName.replace(/\./g, '_');
-      parts.push(`\nTable: "${postgresTableName}"`);
-      if (schema.description) {
-        parts.push(`  Description: ${schema.description}`);
-      }
-      parts.push(`  Columns:`);
+    try {
+      const response = await fetch(`${this.env.AZURE_FUNCTION_URL}/api/schema?database=${database || 'Animal'}`, {
+        headers: {
+          'x-api-key': this.env.AZURE_FUNCTION_KEY,
+        },
+      });
       
-      for (const col of schema.columns) {
-        let colDesc = `    - ${col.name} (${col.postgresType})`;
-        if (col.isPrimaryKey) colDesc += ' PRIMARY KEY';
-        if (col.isForeignKey && col.referencedTable) {
-          colDesc += ` -> ${col.referencedTable}`;
-        }
-        parts.push(colDesc);
+      if (!response.ok) {
+        console.error('Failed to fetch schema:', response.status);
+        return 'Failed to fetch database schema.';
       }
-
-      if (schema.foreignKeys && schema.foreignKeys.length > 0) {
-        parts.push(`  Relationships:`);
-        for (const fk of schema.foreignKeys) {
-          parts.push(`    - ${fk.column} references ${fk.referencedTable}.${fk.referencedColumn}`);
+      
+      const data = await response.json() as { tables: Array<{ name: string; schema: string; columns: Array<{ name: string; type: string; nullable: boolean }> }> };
+      
+      if (!data.tables || data.tables.length === 0) {
+        return 'No tables found in database.';
+      }
+      
+      // Build schema context from Azure Function response
+      const parts: string[] = [];
+      parts.push('Available database tables:\n');
+      parts.push('IMPORTANT: Use square brackets for table and column names (e.g., [dbo].[TableName], [ColumnName])\n');
+      
+      // Prioritize tables based on search terms if provided
+      let tables = data.tables;
+      if (searchTerms && searchTerms.length > 0) {
+        tables = tables.sort((a, b) => {
+          const aScore = searchTerms.some(term => 
+            a.name.toLowerCase().includes(term.toLowerCase())
+          ) ? 1 : 0;
+          const bScore = searchTerms.some(term => 
+            b.name.toLowerCase().includes(term.toLowerCase())
+          ) ? 1 : 0;
+          return bScore - aScore;
+        });
+      }
+      
+      for (const table of tables.slice(0, 25)) {
+        parts.push(`\nTable: [${table.schema}].[${table.name}]`);
+        parts.push(`  Columns:`);
+        
+        for (const col of table.columns.slice(0, 15)) {
+          let colDesc = `    - [${col.name}] (${col.type})`;
+          if (!col.nullable) colDesc += ' NOT NULL';
+          parts.push(colDesc);
+        }
+        
+        if (table.columns.length > 15) {
+          parts.push(`    ... and ${table.columns.length - 15} more columns`);
         }
       }
+      
+      if (tables.length > 25) {
+        parts.push(`\n... and ${tables.length - 25} more tables`);
+      }
+      
+      return parts.join('\n');
+    } catch (error) {
+      console.error('Failed to fetch schema from Azure Function:', error);
+      return 'Error fetching database schema.';
     }
-
-    return parts.join('\n');
   }
 
   async deleteSchema(database: string, tableName: string): Promise<void> {
