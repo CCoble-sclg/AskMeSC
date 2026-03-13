@@ -73,7 +73,18 @@ export class SqlService {
     const keywords = this.extractKeywords(question);
     const schemaContext = await this.schemaService.getSchemaContext(database, keywords);
     
-    const prompt = `You are a SQL expert. Generate a Microsoft SQL Server (T-SQL) query to answer the user's question.
+    const prompt = `You are a SQL analytics expert. Generate a Microsoft SQL Server (T-SQL) query to provide INSIGHTFUL analysis for the user's question.
+
+ANALYTICAL MINDSET (IMPORTANT):
+- Think like a data analyst - what insights would be most valuable?
+- For time-based questions (last month, this year, etc.), consider:
+  - Group by week or day to show trends
+  - Include comparisons to previous periods when relevant
+  - Show breakdowns by category/type when the data supports it
+- For count questions, consider including:
+  - Groupings that reveal patterns (by type, by week, by status)
+  - Percentage breakdowns when useful
+- Always aim to provide context, not just raw numbers
 
 RULES:
 - Generate ONLY a SELECT query - no INSERT, UPDATE, DELETE, or DDL
@@ -81,19 +92,24 @@ RULES:
 - CRITICAL: Use square brackets for table names exactly as shown (e.g., FROM [dbo].[TableName])
 - CRITICAL: Use square brackets for column names exactly as shown (e.g., SELECT [ColumnName])
 - For case-insensitive text search, use LIKE (SQL Server is case-insensitive by default)
-- For date filtering, use operators like >=, <=, BETWEEN with proper date literals (e.g., [DateColumn] >= '2023-01-01')
-- For year filtering, use: YEAR([DateColumn]) = 2023
 
-AGGREGATION RULES (IMPORTANT):
-- When user asks for data "by month", use: FORMAT([DateColumn], 'yyyy-MM') AS month, COUNT(*) or SUM() with GROUP BY
-- When user asks for data "by vendor", "by owner", etc., use GROUP BY on that column with COUNT(*) or SUM()
-- When user asks "how many" or "total", use COUNT(*) or SUM() as appropriate
-- For "by month" queries, always ORDER BY the month column
+TIME-BASED ANALYSIS:
+- For "last month" or "this month": GROUP BY week using DATEPART(WEEK, [date]) or by day
+- For "last year" or trends: GROUP BY month using FORMAT([DateColumn], 'yyyy-MM')
+- Include ORDER BY to show chronological trends
+- Consider showing multiple metrics (COUNT, SUM, AVG) in one query
 
-YEAR FILTERING (CRITICAL):
-- When user asks for a specific year like "for 2024" or "in 2024", ALWAYS filter to ONLY that year
-- Use: WHERE YEAR([DateColumn]) = 2024
-- DO NOT use >= '2024-01-01' alone - this includes future years!
+AGGREGATION PATTERNS:
+- "How many X": Consider grouping by type/category to show breakdown
+- "Show me X by month/week": Use GROUP BY with appropriate date functions
+- Questions about trends: Include time-based grouping and ORDER BY date
+
+DATE FUNCTIONS (T-SQL):
+- Current date: GETDATE()
+- Last month: WHERE [DateColumn] >= DATEADD(MONTH, -1, DATEADD(DAY, 1-DAY(GETDATE()), GETDATE())) AND [DateColumn] < DATEADD(DAY, 1-DAY(GETDATE()), GETDATE())
+- This week: WHERE [DateColumn] >= DATEADD(WEEK, DATEDIFF(WEEK, 0, GETDATE()), 0)
+- Group by week: DATEPART(WEEK, [DateColumn]) AS week_number
+- Group by day: CAST([DateColumn] AS DATE) AS date
 
 - Return ONLY the SQL query, no explanation or markdown
 - If you cannot answer with a SELECT query, return: SELECT 'Cannot generate query for this request' AS error
@@ -363,20 +379,26 @@ SQL query:`;
     const resultContext = this.formatResultsForLLM(queryResult);
     const markdownTable = this.formatResultsAsMarkdownTable(queryResult);
 
-    const prompt = `You are a helpful assistant answering questions about local government data.
+    const prompt = `You are a data analyst assistant for local government. Provide INSIGHTFUL analysis, not just raw answers.
 
 The user asked: "${question}"
 
-I ran this SQL query: ${generatedSql}
+SQL query executed: ${generatedSql}
 
 Query results:
 ${resultContext}
 
-Instructions:
-- Provide a clear, helpful answer to the user's question based on the query results
-- Summarize the key findings concisely
-- Use **bold** for important numbers or highlights
-- Do not reproduce the raw data as a table — a formatted table will be appended automatically`;
+ANALYSIS INSTRUCTIONS:
+- Answer the question with **key insights and context**
+- Identify **trends, patterns, or notable findings** in the data
+- If showing time-based data, comment on trends (increasing, decreasing, peaks)
+- Compare values when relevant (e.g., "X is 50% higher than Y")
+- Highlight **outliers or significant values**
+- Provide **statistical context** when useful (averages, ranges, percentages)
+- Use **bold** for important numbers and findings
+- Be conversational but data-driven
+- Do NOT include a table - one will be appended automatically
+- Keep response focused and under 200 words`;
 
     let text = await this.claude.chat(
       'You are a helpful assistant answering questions about local government data.',
