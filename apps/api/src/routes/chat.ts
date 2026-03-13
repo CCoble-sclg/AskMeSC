@@ -14,8 +14,42 @@ interface ConversationContext {
   timestamp: number;
 }
 
-const conversationCache = new Map<string, ConversationContext>();
 const CONTEXT_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
+
+// Store/retrieve context from D1 (persists across worker instances)
+async function getConversationContext(db: D1Database, conversationId: string): Promise<ConversationContext | null> {
+  try {
+    const result = await db.prepare(
+      `SELECT context_json, updated_at FROM conversation_context WHERE conversation_id = ?`
+    ).bind(conversationId).first();
+    
+    if (!result) return null;
+    
+    const context = JSON.parse(result.context_json as string) as ConversationContext;
+    const updatedAt = new Date(result.updated_at as string).getTime();
+    
+    // Check if expired
+    if (Date.now() - updatedAt > CONTEXT_EXPIRY_MS) {
+      return null;
+    }
+    
+    return context;
+  } catch (e) {
+    console.error('Error getting context:', e);
+    return null;
+  }
+}
+
+async function saveConversationContext(db: D1Database, conversationId: string, context: ConversationContext): Promise<void> {
+  try {
+    await db.prepare(
+      `INSERT OR REPLACE INTO conversation_context (conversation_id, context_json, updated_at) 
+       VALUES (?, ?, datetime('now'))`
+    ).bind(conversationId, JSON.stringify(context)).run();
+  } catch (e) {
+    console.error('Error saving context:', e);
+  }
+}
 
 const DOCUMENT_KEYWORDS = [
   'policy', 'policies', 'contract', 'contracts', 'document', 'documents',
@@ -135,12 +169,12 @@ chatRoutes.post('/', async (c) => {
 
   const conversationId = body.conversationId || crypto.randomUUID();
   
-  // Get previous conversation context
-  const previousContext = conversationCache.get(conversationId);
+  // Get previous conversation context from D1
+  const previousContext = await getConversationContext(c.env.DB, conversationId);
   
   try {
     const { type: queryType, confidence } = determineQueryType(message, previousContext);
-    console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)}), hasContext: ${!!previousContext}`);
+    console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)}), hasContext: ${!!previousContext}, conversationId: ${conversationId}`);
     
     if (queryType === 'sql' && c.env.AZURE_FUNCTION_URL) {
       console.log('Attempting Azure SQL query path via Function proxy...');
@@ -168,12 +202,12 @@ Follow-up question: ${message}`;
         
         const { text } = await sqlService.generateResponse(message, result, generatedSql);
         
-        // Save context for follow-up questions
+        // Save context for follow-up questions (in D1)
         const resultSummary = result.rowCount === 1 
           ? JSON.stringify(result.rows[0])
           : `${result.rowCount} rows returned`;
         
-        conversationCache.set(conversationId, {
+        await saveConversationContext(c.env.DB, conversationId, {
           lastQueryType: 'sql',
           lastSql: generatedSql,
           lastQuestion: message,
@@ -204,8 +238,8 @@ Follow-up question: ${message}`;
     const rag = new RagService(c.env);
     const { response, sources } = await rag.query(message);
 
-    // Save context for document queries too
-    conversationCache.set(conversationId, {
+    // Save context for document queries too (in D1)
+    await saveConversationContext(c.env.DB, conversationId, {
       lastQueryType: 'document',
       lastQuestion: message,
       timestamp: Date.now(),

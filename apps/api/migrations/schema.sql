@@ -101,3 +101,12 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category);
+
+-- Conversation context for follow-up questions (persists across worker instances)
+CREATE TABLE IF NOT EXISTS conversation_context (
+    conversation_id TEXT PRIMARY KEY,
+    context_json TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_context_updated ON conversation_context(updated_at);

@@ -126,6 +126,29 @@ DATE FUNCTIONS (T-SQL):
 - Return ONLY the SQL query, no explanation or markdown
 - If you cannot answer with a SELECT query, return: SELECT 'Cannot generate query for this request' AS error
 
+ANIMAL DATABASE DOMAIN KNOWLEDGE:
+This database tracks animal shelter operations. Key concepts:
+
+1. INTAKE = animals "taken in" or "received":
+   - Query: [SYSADM].[activity] table WHERE [activity_type] IN ('STRAY', 'OWNED', 'RESCUE', 'PROT CUST')
+   - STRAY = stray animals found/brought in
+   - OWNED = owner surrenders  
+   - RESCUE = rescue transfers
+   - PROT CUST = protective custody
+   
+2. Activity types that are NOT intakes (exclude from intake counts):
+   - INV = investigations
+   - OTHER = miscellaneous
+   - WILD = wildlife encounters
+   - TRANSPORT = animal transport
+   
+3. Key columns in [SYSADM].[activity]:
+   - [activity_date] = date of activity (use for date filtering)
+   - [activity_type] = type of activity
+   - [animal_id] = links to animal record
+
+4. For unique animal counts, consider using DISTINCT on [animal_id] to avoid duplicates
+
 ${schemaContext}
 
 User question: ${question}
