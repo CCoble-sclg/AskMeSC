@@ -16,7 +16,11 @@ const SQL_KEYWORDS = [
   'how many', 'count', 'total', 'sum', 'average', 'list', 'show me',
   'find', 'search for', 'what are', 'who', 'which', 'when', 'where',
   'invoices', 'payments', 'vendors', 'employees', 'records', 'transactions',
-  'amount', 'date', 'between', 'greater than', 'less than', 'over', 'under'
+  'amount', 'date', 'between', 'greater than', 'less than', 'over', 'under',
+  'animal', 'animals', 'dog', 'dogs', 'cat', 'cats', 'pet', 'pets',
+  'license', 'licenses', 'owner', 'owners', 'breed', 'breeds',
+  'bite', 'bites', 'violation', 'violations', 'kennel', 'shelter',
+  'database', 'db', 'table', 'tables', 'data'
 ];
 
 function determineQueryType(question: string): { type: QueryType; confidence: number } {
