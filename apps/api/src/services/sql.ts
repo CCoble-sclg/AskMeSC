@@ -78,25 +78,15 @@ export class SqlService {
     
     const prompt = `You are a SQL analytics expert. Generate a Microsoft SQL Server (T-SQL) query to provide INSIGHTFUL analysis for the user's question.
 
-${isFollowUp ? `FOLLOW-UP QUESTION HANDLING:
-- This is a follow-up to a previous query. Use the previous SQL as a starting point.
-- If the user says something is "too high/low" or "wrong", consider:
-  - Using a different table (e.g., animal table instead of kennel for unique animals)
-  - Adding filters or different groupings
-  - Checking for duplicates or historical records
-- If asked to "break down" or add detail, add GROUP BY clauses
-- Maintain relevance to the original question while addressing the follow-up
+${isFollowUp ? `FOLLOW-UP QUESTION HANDLING (CRITICAL):
+- This is a follow-up to a previous query. You MUST start from the previous SQL and modify it.
+- KEEP all existing WHERE clauses, date filters, and table references from the previous SQL.
+- Only ADD or CHANGE what is needed to answer the follow-up (e.g., add a GROUP BY, add a column).
+- If asked to "break down" or add detail, add a GROUP BY clause to the previous query — do NOT remove the date filter.
+- If asked about a subset (e.g., "just dogs"), add a WHERE filter to the previous query.
+- DO NOT write a completely new query — modify the previous one.
 
-` : ''}ANALYTICAL MINDSET (IMPORTANT):
-- Think like a data analyst - what insights would be most valuable?
-- For time-based questions (last month, this year, etc.), consider:
-  - Group by week or day to show trends
-  - Include comparisons to previous periods when relevant
-  - Show breakdowns by category/type when the data supports it
-- For count questions, consider including:
-  - Groupings that reveal patterns (by type, by week, by status)
-  - Percentage breakdowns when useful
-- Always aim to provide context, not just raw numbers
+` : ''}
 
 RULES:
 - Generate ONLY a SELECT query - no INSERT, UPDATE, DELETE, or DDL
@@ -411,6 +401,7 @@ ANALYSIS INSTRUCTIONS:
 - Use **bold** for important numbers and findings
 - Be conversational but data-driven
 - Do NOT include a table - one will be appended automatically
+- Do NOT guess specific dates or years — only reference dates if they appear in the query results
 - Keep response focused and under 200 words`;
 
     let text = await this.claude.chat(
