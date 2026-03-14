@@ -247,12 +247,14 @@ chatRoutes.post('/', async (c) => {
         console.error('Non-critical: failed to save conversation context:', e);
       }
       
+      const debugInfo = `[ctx: ${!!previousContext}, followUp: ${isFollowUp}, usedCtx: ${usedContext}, prevSql: ${!!previousSql}]`;
+      
       const chatResponse: ChatResponse = {
         response: text,
         sources: [{
           table: 'SQL Query',
           id: 'generated',
-          snippet: generatedSql,
+          snippet: `${debugInfo} ${generatedSql}`,
           score: confidence,
         }],
         conversationId,
