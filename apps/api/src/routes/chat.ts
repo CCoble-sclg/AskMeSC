@@ -169,40 +169,46 @@ chatRoutes.post('/', async (c) => {
 
   const conversationId = body.conversationId || crypto.randomUUID();
   
-  // Get previous conversation context from D1
-  const previousContext = await getConversationContext(c.env.DB, conversationId);
-  
   try {
-    const { type: queryType, confidence } = determineQueryType(message, previousContext);
+    // Get previous conversation context from D1 (non-critical, failures are ignored)
+    let previousContext: ConversationContext | null = null;
+    try {
+      previousContext = await getConversationContext(c.env.DB, conversationId);
+    } catch (e) {
+      console.error('Non-critical: failed to get conversation context:', e);
+    }
+
+    const { type: queryType, confidence } = determineQueryType(message, previousContext ?? undefined);
     console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)}), hasContext: ${!!previousContext}, conversationId: ${conversationId}`);
     
     if (queryType === 'sql' && c.env.AZURE_FUNCTION_URL) {
       console.log('Attempting Azure SQL query path via Function proxy...');
-      try {
-        const sqlService = new SqlService(c.env);
-        console.log('SqlService created, calling queryWithNaturalLanguage...');
-        
-        // Build context string for follow-up questions
-        let contextualMessage = message;
-        if (previousContext && isFollowUpQuestion(message, previousContext)) {
-          contextualMessage = `Previous question: "${previousContext.lastQuestion}"
+
+      const sqlService = new SqlService(c.env);
+      console.log('SqlService created, calling queryWithNaturalLanguage...');
+      
+      // Build context string for follow-up questions
+      let contextualMessage = message;
+      if (previousContext && isFollowUpQuestion(message, previousContext)) {
+        contextualMessage = `Previous question: "${previousContext.lastQuestion}"
 Previous SQL: ${previousContext.lastSql}
 Previous result summary: ${previousContext.lastResultSummary}
 
 Follow-up question: ${message}`;
-          console.log('Using conversation context for follow-up question');
-        }
-        
-        const { result, generatedSql } = await sqlService.queryWithNaturalLanguage(
-          contextualMessage,
-          body.filters?.database
-        );
-        console.log(`SQL generated: ${generatedSql}`);
-        console.log(`Query returned ${result.rowCount} rows`);
-        
-        const { text } = await sqlService.generateResponse(message, result, generatedSql);
-        
-        // Save context for follow-up questions (in D1)
+        console.log('Using conversation context for follow-up question');
+      }
+      
+      const { result, generatedSql } = await sqlService.queryWithNaturalLanguage(
+        contextualMessage,
+        body.filters?.database
+      );
+      console.log(`SQL generated: ${generatedSql}`);
+      console.log(`Query returned ${result.rowCount} rows`);
+      
+      const { text } = await sqlService.generateResponse(message, result, generatedSql);
+      
+      // Save context for follow-up questions (non-critical)
+      try {
         const resultSummary = result.rowCount === 1 
           ? JSON.stringify(result.rows[0])
           : `${result.rowCount} rows returned`;
@@ -214,36 +220,40 @@ Follow-up question: ${message}`;
           lastResultSummary: resultSummary,
           timestamp: Date.now(),
         });
-        
-        const chatResponse: ChatResponse = {
-          response: text,
-          sources: [{
-            table: 'SQL Query',
-            id: 'generated',
-            snippet: generatedSql,
-            score: confidence,
-          }],
-          conversationId,
-        };
-        
-        return c.json(chatResponse);
-      } catch (sqlError) {
-        console.error('SQL query failed, falling back to document search:', sqlError);
-        console.error('Error details:', String(sqlError));
+      } catch (e) {
+        console.error('Non-critical: failed to save conversation context:', e);
       }
-    } else {
-      console.log(`Skipping SQL: queryType=${queryType}, hasAzureFunction=${!!c.env.AZURE_FUNCTION_URL}`);
+      
+      const chatResponse: ChatResponse = {
+        response: text,
+        sources: [{
+          table: 'SQL Query',
+          id: 'generated',
+          snippet: generatedSql,
+          score: confidence,
+        }],
+        conversationId,
+      };
+      
+      return c.json(chatResponse);
     }
     
+    // Document search path
+    console.log(`Using document search: queryType=${queryType}, hasAzureFunction=${!!c.env.AZURE_FUNCTION_URL}`);
+
     const rag = new RagService(c.env);
     const { response, sources } = await rag.query(message);
 
-    // Save context for document queries too (in D1)
-    await saveConversationContext(c.env.DB, conversationId, {
-      lastQueryType: 'document',
-      lastQuestion: message,
-      timestamp: Date.now(),
-    });
+    // Save context (non-critical)
+    try {
+      await saveConversationContext(c.env.DB, conversationId, {
+        lastQueryType: 'document',
+        lastQuestion: message,
+        timestamp: Date.now(),
+      });
+    } catch (e) {
+      console.error('Non-critical: failed to save conversation context:', e);
+    }
 
     const result: ChatResponse = {
       response,
@@ -254,8 +264,9 @@ Follow-up question: ${message}`;
     return c.json(result);
   } catch (error) {
     console.error('Chat error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return c.json({ 
-      error: 'Failed to process your question. Please try again.' 
+      error: `Failed to process your question: ${errorMessage}` 
     }, 500);
   }
 });
