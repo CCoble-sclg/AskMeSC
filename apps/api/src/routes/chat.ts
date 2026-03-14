@@ -83,17 +83,20 @@ function isFollowUpQuestion(question: string, context: ConversationContext | und
   
   const lowerQuestion = question.toLowerCase();
   
-  // Short questions are often follow-ups
-  if (question.split(' ').length <= 6) {
-    for (const indicator of FOLLOWUP_INDICATORS) {
-      if (lowerQuestion.includes(indicator)) {
-        return true;
-      }
+  // Check for follow-up indicator phrases anywhere in the question
+  for (const indicator of FOLLOWUP_INDICATORS) {
+    if (lowerQuestion.includes(indicator)) {
+      return true;
     }
   }
   
   // Starts with follow-up words
-  if (/^(but|and|also|what about|can you|could you|why|how about)/i.test(lowerQuestion)) {
+  if (/^(but|and|also|what about|can you|could you|why|how about|break|show|now)/i.test(lowerQuestion)) {
+    return true;
+  }
+  
+  // Short questions with active context are likely follow-ups
+  if (question.split(' ').length <= 8) {
     return true;
   }
   
@@ -185,11 +188,10 @@ chatRoutes.post('/', async (c) => {
       console.log('Attempting Azure SQL query path via Function proxy...');
 
       const sqlService = new SqlService(c.env);
-      console.log('SqlService created, calling queryWithNaturalLanguage...');
+      const isFollowUp = previousContext && isFollowUpQuestion(message, previousContext);
       
-      // Build context string for follow-up questions
       let contextualMessage = message;
-      if (previousContext && isFollowUpQuestion(message, previousContext)) {
+      if (isFollowUp) {
         contextualMessage = `Previous question: "${previousContext.lastQuestion}"
 Previous SQL: ${previousContext.lastSql}
 Previous result summary: ${previousContext.lastResultSummary}
@@ -198,10 +200,29 @@ Follow-up question: ${message}`;
         console.log('Using conversation context for follow-up question');
       }
       
-      const { result, generatedSql } = await sqlService.queryWithNaturalLanguage(
-        contextualMessage,
-        body.filters?.database
-      );
+      let result: Awaited<ReturnType<typeof sqlService.queryWithNaturalLanguage>>['result'];
+      let generatedSql: string;
+      
+      try {
+        const queryResult = await sqlService.queryWithNaturalLanguage(
+          contextualMessage,
+          body.filters?.database
+        );
+        result = queryResult.result;
+        generatedSql = queryResult.generatedSql;
+      } catch (followUpError) {
+        if (isFollowUp) {
+          console.error('Follow-up query failed, retrying without context:', followUpError);
+          const queryResult = await sqlService.queryWithNaturalLanguage(
+            message,
+            body.filters?.database
+          );
+          result = queryResult.result;
+          generatedSql = queryResult.generatedSql;
+        } else {
+          throw followUpError;
+        }
+      }
       console.log(`SQL generated: ${generatedSql}`);
       console.log(`Query returned ${result.rowCount} rows`);
       
