@@ -188,30 +188,27 @@ chatRoutes.post('/', async (c) => {
       console.log('Attempting Azure SQL query path via Function proxy...');
 
       const sqlService = new SqlService(c.env);
-      const isFollowUp = previousContext && isFollowUpQuestion(message, previousContext);
+      const isFollowUp = !!(previousContext && isFollowUpQuestion(message, previousContext));
+      console.log(`isFollowUp: ${isFollowUp}, previousContext exists: ${!!previousContext}`);
       
-      let contextualMessage = message;
-      if (isFollowUp) {
-        contextualMessage = `Previous question: "${previousContext.lastQuestion}"
-Previous SQL: ${previousContext.lastSql}
-Previous result summary: ${previousContext.lastResultSummary}
-
-Follow-up question: ${message}`;
-        console.log('Using conversation context for follow-up question');
-      }
+      const previousSql = isFollowUp && previousContext?.lastSql ? previousContext.lastSql : undefined;
       
       let result: Awaited<ReturnType<typeof sqlService.queryWithNaturalLanguage>>['result'];
       let generatedSql: string;
+      let usedContext = false;
       
-      try {
-        const queryResult = await sqlService.queryWithNaturalLanguage(
-          contextualMessage,
-          body.filters?.database
-        );
-        result = queryResult.result;
-        generatedSql = queryResult.generatedSql;
-      } catch (followUpError) {
-        if (isFollowUp) {
+      if (previousSql) {
+        try {
+          const queryResult = await sqlService.queryWithNaturalLanguage(
+            message,
+            body.filters?.database,
+            previousSql
+          );
+          result = queryResult.result;
+          generatedSql = queryResult.generatedSql;
+          usedContext = true;
+          console.log('Follow-up query succeeded with context');
+        } catch (followUpError) {
           console.error('Follow-up query failed, retrying without context:', followUpError);
           const queryResult = await sqlService.queryWithNaturalLanguage(
             message,
@@ -219,11 +216,16 @@ Follow-up question: ${message}`;
           );
           result = queryResult.result;
           generatedSql = queryResult.generatedSql;
-        } else {
-          throw followUpError;
         }
+      } else {
+        const queryResult = await sqlService.queryWithNaturalLanguage(
+          message,
+          body.filters?.database
+        );
+        result = queryResult.result;
+        generatedSql = queryResult.generatedSql;
       }
-      console.log(`SQL generated: ${generatedSql}`);
+      console.log(`SQL generated (usedContext=${usedContext}): ${generatedSql}`);
       console.log(`Query returned ${result.rowCount} rows`);
       
       const { text } = await sqlService.generateResponse(message, result, generatedSql);

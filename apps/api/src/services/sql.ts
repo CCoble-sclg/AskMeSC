@@ -69,53 +69,41 @@ export class SqlService {
     return prioritized.slice(0, 10);
   }
 
-  async generateSql(question: string, database?: string): Promise<string> {
+  async generateSql(question: string, database?: string, previousSql?: string): Promise<string> {
     const keywords = this.extractKeywords(question);
     const schemaContext = await this.schemaService.getSchemaContext(database, keywords);
     
-    // Check if this is a follow-up question with context
-    const isFollowUp = question.includes('Previous question:');
-    
-    const prompt = `You are a SQL analytics expert. Generate a Microsoft SQL Server (T-SQL) query to provide INSIGHTFUL analysis for the user's question.
+    let followUpBlock = '';
+    if (previousSql) {
+      followUpBlock = `
+PREVIOUS SQL QUERY (you MUST use this as your starting point):
+${previousSql}
 
-${isFollowUp ? `FOLLOW-UP QUESTION HANDLING (CRITICAL):
-- This is a follow-up to a previous query. You MUST start from the previous SQL and modify it.
-- KEEP all existing WHERE clauses, date filters, and table references from the previous SQL.
-- Only ADD or CHANGE what is needed to answer the follow-up (e.g., add a GROUP BY, add a column).
-- If asked to "break down" or add detail, add a GROUP BY clause to the previous query — do NOT remove the date filter.
-- If asked about a subset (e.g., "just dogs"), add a WHERE filter to the previous query.
-- DO NOT write a completely new query — modify the previous one.
+FOLLOW-UP INSTRUCTIONS (CRITICAL — read carefully):
+The user is asking a follow-up question about the results of the SQL above.
+You MUST take the previous SQL query and modify it. Do NOT write a new query from scratch.
+- KEEP the same FROM table
+- KEEP all WHERE clauses (especially date filters)
+- ADD a GROUP BY, extra column, or extra WHERE filter as needed to answer the follow-up
+- Example: if previous query was "SELECT COUNT(*) FROM [t] WHERE [date] > X" and user says "break it down by type", output: "SELECT [type], COUNT(*) FROM [t] WHERE [date] > X GROUP BY [type]"
 
-` : ''}
+`;
+    }
 
+    const prompt = `You are a SQL expert. Generate a Microsoft SQL Server (T-SQL) query.
+${followUpBlock}
 RULES:
-- Generate ONLY a SELECT query - no INSERT, UPDATE, DELETE, or DDL
-- Use TOP ${MAX_ROWS} after SELECT (e.g., SELECT TOP ${MAX_ROWS} ...)
-- CRITICAL: Use square brackets for table names exactly as shown (e.g., FROM [dbo].[TableName])
-- CRITICAL: Use square brackets for column names exactly as shown (e.g., SELECT [ColumnName])
-- For case-insensitive text search, use LIKE (SQL Server is case-insensitive by default)
-
-TIME-BASED ANALYSIS:
-- For "last month" or "this month": GROUP BY week using DATEPART(WEEK, [date]) or by day
-- For "last year" or trends: GROUP BY month using FORMAT([DateColumn], 'yyyy-MM')
-- Include ORDER BY to show chronological trends
-- Consider showing multiple metrics (COUNT, SUM, AVG) in one query
-
-AGGREGATION PATTERNS:
-- "How many X": Consider grouping by type/category to show breakdown
-- "Show me X by month/week": Use GROUP BY with appropriate date functions
-- Questions about trends: Include time-based grouping and ORDER BY date
+- Generate ONLY a SELECT query
+- Use TOP ${MAX_ROWS} after SELECT
+- Use square brackets for table and column names exactly as shown in the schema
+- Use ONLY table and column names from the schema below — do not invent names
+- Return ONLY the SQL query, no explanation or markdown
 
 DATE FUNCTIONS (T-SQL):
 - Current date: GETDATE()
-- Last month: WHERE [DateColumn] >= DATEADD(MONTH, -1, DATEADD(DAY, 1-DAY(GETDATE()), GETDATE())) AND [DateColumn] < DATEADD(DAY, 1-DAY(GETDATE()), GETDATE())
-- This week: WHERE [DateColumn] >= DATEADD(WEEK, DATEDIFF(WEEK, 0, GETDATE()), 0)
-- Group by week: DATEPART(WEEK, [DateColumn]) AS week_number
-- Group by day: CAST([DateColumn] AS DATE) AS date
-
-- Return ONLY the SQL query, no explanation or markdown
-- If you cannot answer with a SELECT query, return: SELECT 'Cannot generate query for this request' AS error
-- Use ONLY the table and column names shown in the schema below — do not assume or invent names
+- Last month: WHERE [Col] >= DATEADD(MONTH, -1, DATEADD(DAY, 1-DAY(GETDATE()), GETDATE())) AND [Col] < DATEADD(DAY, 1-DAY(GETDATE()), GETDATE())
+- Group by day: CAST([Col] AS DATE)
+- Group by month: FORMAT([Col], 'yyyy-MM')
 
 ${schemaContext}
 
@@ -218,9 +206,10 @@ SQL query:`;
 
   async queryWithNaturalLanguage(
     question: string, 
-    database?: string
+    database?: string,
+    previousSql?: string
   ): Promise<{ result: QueryResult; generatedSql: string }> {
-    const sqlQuery = await this.generateSql(question, database);
+    const sqlQuery = await this.generateSql(question, database, previousSql);
     
     if (sqlQuery.includes("Cannot generate query")) {
       throw new Error('Unable to generate a valid query for this question');
