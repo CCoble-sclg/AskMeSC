@@ -3,7 +3,7 @@ import type { ChatResponse } from './types';
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
 class ChatApi {
-  async sendMessage(message: string, conversationId?: string): Promise<ChatResponse> {
+  async sendMessage(message: string, conversationId?: string, previousSql?: string): Promise<ChatResponse> {
     const response = await fetch(`${API_BASE}/api/chat`, {
       method: 'POST',
       headers: {
@@ -12,6 +12,7 @@ class ChatApi {
       body: JSON.stringify({
         message,
         conversationId,
+        previousSql,
       }),
     });
 

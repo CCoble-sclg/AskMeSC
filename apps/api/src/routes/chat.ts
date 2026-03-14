@@ -6,51 +6,6 @@ import { SchemaService } from '../services/schema';
 
 export const chatRoutes = new Hono<{ Bindings: Env }>();
 
-interface ConversationContext {
-  lastQueryType: 'sql' | 'document';
-  lastSql?: string;
-  lastQuestion?: string;
-  lastResultSummary?: string;
-  timestamp: number;
-}
-
-const CONTEXT_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
-
-// Store/retrieve context from D1 (persists across worker instances)
-async function getConversationContext(db: D1Database, conversationId: string): Promise<ConversationContext | null> {
-  try {
-    const result = await db.prepare(
-      `SELECT context_json, updated_at FROM conversation_context WHERE conversation_id = ?`
-    ).bind(conversationId).first();
-    
-    if (!result) return null;
-    
-    const context = JSON.parse(result.context_json as string) as ConversationContext;
-    const updatedAt = new Date(result.updated_at as string).getTime();
-    
-    // Check if expired
-    if (Date.now() - updatedAt > CONTEXT_EXPIRY_MS) {
-      return null;
-    }
-    
-    return context;
-  } catch (e) {
-    console.error('Error getting context:', e);
-    return null;
-  }
-}
-
-async function saveConversationContext(db: D1Database, conversationId: string, context: ConversationContext): Promise<void> {
-  try {
-    await db.prepare(
-      `INSERT OR REPLACE INTO conversation_context (conversation_id, context_json, updated_at) 
-       VALUES (?, ?, datetime('now'))`
-    ).bind(conversationId, JSON.stringify(context)).run();
-  } catch (e) {
-    console.error('Error saving context:', e);
-  }
-}
-
 const DOCUMENT_KEYWORDS = [
   'policy', 'policies', 'contract', 'contracts', 'document', 'documents',
   'agreement', 'handbook', 'manual', 'guideline', 'procedure', 'rule',
@@ -68,47 +23,11 @@ const SQL_KEYWORDS = [
   'database', 'db', 'table', 'tables', 'data'
 ];
 
-const FOLLOWUP_INDICATORS = [
-  'that', 'this', 'those', 'these', 'it', 'they', 'the count', 'the number',
-  'break it down', 'break that down', 'more detail', 'why', 'explain',
-  'too high', 'too low', 'wrong', 'incorrect', 'not right',
-  'by week', 'by month', 'by day', 'by type', 'by category',
-  'filter', 'only', 'exclude', 'just the', 'instead'
-];
-
-function isFollowUpQuestion(question: string, context: ConversationContext | undefined): boolean {
-  if (!context || Date.now() - context.timestamp > CONTEXT_EXPIRY_MS) {
-    return false;
-  }
-  
+function determineQueryType(question: string, hasPreviousSql: boolean): { type: QueryType; confidence: number } {
   const lowerQuestion = question.toLowerCase();
   
-  // Check for follow-up indicator phrases anywhere in the question
-  for (const indicator of FOLLOWUP_INDICATORS) {
-    if (lowerQuestion.includes(indicator)) {
-      return true;
-    }
-  }
-  
-  // Starts with follow-up words
-  if (/^(but|and|also|what about|can you|could you|why|how about|break|show|now)/i.test(lowerQuestion)) {
-    return true;
-  }
-  
-  // Short questions with active context are likely follow-ups
-  if (question.split(' ').length <= 8) {
-    return true;
-  }
-  
-  return false;
-}
-
-function determineQueryType(question: string, context?: ConversationContext): { type: QueryType; confidence: number } {
-  const lowerQuestion = question.toLowerCase();
-  
-  // If this is a follow-up to a SQL query, keep it as SQL
-  if (context?.lastQueryType === 'sql' && isFollowUpQuestion(question, context)) {
-    console.log('Detected follow-up to SQL query, maintaining SQL path');
+  // If we have previous SQL context, stay on the SQL path
+  if (hasPreviousSql) {
     return { type: 'sql', confidence: 0.9 };
   }
   
@@ -171,27 +90,16 @@ chatRoutes.post('/', async (c) => {
   }
 
   const conversationId = body.conversationId || crypto.randomUUID();
+  const previousSql = body.previousSql;
   
   try {
-    // Get previous conversation context from D1 (non-critical, failures are ignored)
-    let previousContext: ConversationContext | null = null;
-    try {
-      previousContext = await getConversationContext(c.env.DB, conversationId);
-    } catch (e) {
-      console.error('Non-critical: failed to get conversation context:', e);
-    }
-
-    const { type: queryType, confidence } = determineQueryType(message, previousContext ?? undefined);
-    console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)}), hasContext: ${!!previousContext}, conversationId: ${conversationId}`);
+    const { type: queryType, confidence } = determineQueryType(message, !!previousSql);
+    console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)}), hasPreviousSql: ${!!previousSql}, conversationId: ${conversationId}`);
     
     if (queryType === 'sql' && c.env.AZURE_FUNCTION_URL) {
       console.log('Attempting Azure SQL query path via Function proxy...');
 
       const sqlService = new SqlService(c.env);
-      const isFollowUp = !!(previousContext && isFollowUpQuestion(message, previousContext));
-      console.log(`isFollowUp: ${isFollowUp}, previousContext exists: ${!!previousContext}`);
-      
-      const previousSql = isFollowUp && previousContext?.lastSql ? previousContext.lastSql : undefined;
       
       let result: Awaited<ReturnType<typeof sqlService.queryWithNaturalLanguage>>['result'];
       let generatedSql: string;
@@ -199,6 +107,7 @@ chatRoutes.post('/', async (c) => {
       
       if (previousSql) {
         try {
+          console.log(`Using previous SQL for follow-up: ${previousSql.substring(0, 80)}...`);
           const queryResult = await sqlService.queryWithNaturalLanguage(
             message,
             body.filters?.database,
@@ -207,7 +116,6 @@ chatRoutes.post('/', async (c) => {
           result = queryResult.result;
           generatedSql = queryResult.generatedSql;
           usedContext = true;
-          console.log('Follow-up query succeeded with context');
         } catch (followUpError) {
           console.error('Follow-up query failed, retrying without context:', followUpError);
           const queryResult = await sqlService.queryWithNaturalLanguage(
@@ -230,34 +138,16 @@ chatRoutes.post('/', async (c) => {
       
       const { text } = await sqlService.generateResponse(message, result, generatedSql);
       
-      // Save context for follow-up questions (non-critical)
-      try {
-        const resultSummary = result.rowCount === 1 
-          ? JSON.stringify(result.rows[0])
-          : `${result.rowCount} rows returned`;
-        
-        await saveConversationContext(c.env.DB, conversationId, {
-          lastQueryType: 'sql',
-          lastSql: generatedSql,
-          lastQuestion: message,
-          lastResultSummary: resultSummary,
-          timestamp: Date.now(),
-        });
-      } catch (e) {
-        console.error('Non-critical: failed to save conversation context:', e);
-      }
-      
-      const debugInfo = `[ctx: ${!!previousContext}, followUp: ${isFollowUp}, usedCtx: ${usedContext}, prevSql: ${!!previousSql}]`;
-      
       const chatResponse: ChatResponse = {
         response: text,
         sources: [{
           table: 'SQL Query',
           id: 'generated',
-          snippet: `${debugInfo} ${generatedSql}`,
+          snippet: generatedSql,
           score: confidence,
         }],
         conversationId,
+        lastSql: generatedSql,
       };
       
       return c.json(chatResponse);
@@ -268,17 +158,6 @@ chatRoutes.post('/', async (c) => {
 
     const rag = new RagService(c.env);
     const { response, sources } = await rag.query(message);
-
-    // Save context (non-critical)
-    try {
-      await saveConversationContext(c.env.DB, conversationId, {
-        lastQueryType: 'document',
-        lastQuestion: message,
-        timestamp: Date.now(),
-      });
-    } catch (e) {
-      console.error('Non-critical: failed to save conversation context:', e);
-    }
 
     const result: ChatResponse = {
       response,

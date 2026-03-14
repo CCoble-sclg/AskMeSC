@@ -34,6 +34,7 @@ export interface ChatMessage {
 export interface ChatRequest {
   message: string;
   conversationId?: string;
+  previousSql?: string;
   filters?: {
     database?: string;
     tables?: string[];
@@ -44,6 +45,7 @@ export interface ChatResponse {
   response: string;
   sources?: Source[];
   conversationId: string;
+  lastSql?: string;
 }
 
 export interface ChartData {
