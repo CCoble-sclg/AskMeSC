@@ -1,3 +1,10 @@
+export class RateLimitError extends Error {
+  constructor(_detail?: string) {
+    super('Rate limit exceeded. Please wait a moment before asking another question.');
+    this.name = 'RateLimitError';
+  }
+}
+
 interface ClaudeMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -60,6 +67,9 @@ export class ClaudeService {
 
     if (!response.ok) {
       const errorBody = await response.text();
+      if (response.status === 429) {
+        throw new RateLimitError(errorBody);
+      }
       throw new Error(`Claude API error (${response.status}): ${errorBody}`);
     }
 

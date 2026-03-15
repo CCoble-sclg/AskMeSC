@@ -51,11 +51,11 @@
       };
       messages = [...messages, assistantMessage];
     } catch (error) {
-      // Add error message
+      const errorText = error instanceof Error ? error.message : 'An unexpected error occurred.';
       const errorMessage: Message = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: 'Sorry, I encountered an error processing your question. Please try again.',
+        content: errorText,
         timestamp: new Date(),
         isError: true,
       };

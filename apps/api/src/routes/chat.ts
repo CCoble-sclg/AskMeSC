@@ -3,6 +3,7 @@ import type { Env, ChatRequest, ChatResponse, Source, QueryType } from '../types
 import { RagService } from '../services/rag';
 import { SqlService } from '../services/sql';
 import { SchemaService } from '../services/schema';
+import { RateLimitError } from '../services/claude';
 
 export const chatRoutes = new Hono<{ Bindings: Env }>();
 
@@ -119,6 +120,7 @@ chatRoutes.post('/', async (c) => {
           generatedSql = queryResult.generatedSql;
           usedContext = true;
         } catch (followUpError) {
+          if (followUpError instanceof RateLimitError) throw followUpError;
           console.warn('Follow-up query with context failed, retrying with question context only:', followUpError);
           try {
             const retryQuestion = previousQuestion
@@ -131,6 +133,7 @@ chatRoutes.post('/', async (c) => {
             result = queryResult.result;
             generatedSql = queryResult.generatedSql;
           } catch (retryError) {
+            if (retryError instanceof RateLimitError) throw retryError;
             console.error('Retry also failed, falling back to standalone query:', retryError);
             const queryResult = await sqlService.queryWithNaturalLanguage(
               message,
@@ -184,6 +187,12 @@ chatRoutes.post('/', async (c) => {
 
     return c.json(result);
   } catch (error) {
+    if (error instanceof RateLimitError) {
+      console.warn('Rate limit hit:', error.message);
+      return c.json({ 
+        error: 'I\'m processing too many requests right now. Please wait about 30 seconds and try again.' 
+      }, 429);
+    }
     console.error('Chat error:', error);
     const errorMessage = error instanceof Error ? error.message : String(error);
     return c.json({ 
