@@ -69,23 +69,33 @@ export class SqlService {
     return prioritized.slice(0, 10);
   }
 
-  async generateSql(question: string, database?: string, previousSql?: string): Promise<string> {
-    const keywords = this.extractKeywords(question);
+  async generateSql(
+    question: string,
+    database?: string,
+    previousSql?: string,
+    previousQuestion?: string
+  ): Promise<string> {
+    const allKeywords = previousQuestion
+      ? [...this.extractKeywords(question), ...this.extractKeywords(previousQuestion)]
+      : this.extractKeywords(question);
+    const keywords = [...new Set(allKeywords)];
     const schemaContext = await this.schemaService.getSchemaContext(database, keywords);
     
     let followUpBlock = '';
     if (previousSql) {
       followUpBlock = `
+PREVIOUS USER QUESTION: ${previousQuestion || '(unknown)'}
 PREVIOUS SQL QUERY (you MUST use this as your starting point):
 ${previousSql}
 
 FOLLOW-UP INSTRUCTIONS (CRITICAL — read carefully):
 The user is asking a follow-up question about the results of the SQL above.
-You MUST take the previous SQL query and modify it. Do NOT write a new query from scratch.
-- KEEP the same FROM table
-- KEEP all WHERE clauses (especially date filters)
-- ADD a GROUP BY, extra column, or extra WHERE filter as needed to answer the follow-up
+You MUST take the previous SQL query and MODIFY it. Do NOT write a new query from scratch.
+- KEEP the same FROM / JOIN tables
+- KEEP ALL WHERE clauses exactly as they are (especially date filters, status filters, etc.)
+- Only ADD or CHANGE the SELECT columns, GROUP BY, ORDER BY, or add extra WHERE filters as needed
 - Example: if previous query was "SELECT COUNT(*) FROM [t] WHERE [date] > X" and user says "break it down by type", output: "SELECT [type], COUNT(*) FROM [t] WHERE [date] > X GROUP BY [type]"
+- If the previous query had date filters like DATEADD(...), those MUST appear in your output
 
 `;
     }
@@ -120,7 +130,6 @@ SQL query:`;
     let sqlQuery = response?.trim() || '';
     sqlQuery = sqlQuery.replace(/```sql\n?/gi, '').replace(/```\n?/g, '').trim();
     
-    // Ensure TOP clause exists
     if (!sqlQuery.toUpperCase().includes('TOP ')) {
       sqlQuery = sqlQuery.replace(/^SELECT\s+/i, `SELECT TOP ${MAX_ROWS} `);
     }
@@ -207,9 +216,10 @@ SQL query:`;
   async queryWithNaturalLanguage(
     question: string, 
     database?: string,
-    previousSql?: string
+    previousSql?: string,
+    previousQuestion?: string
   ): Promise<{ result: QueryResult; generatedSql: string }> {
-    const sqlQuery = await this.generateSql(question, database, previousSql);
+    const sqlQuery = await this.generateSql(question, database, previousSql, previousQuestion);
     
     if (sqlQuery.includes("Cannot generate query")) {
       throw new Error('Unable to generate a valid query for this question');
@@ -366,13 +376,19 @@ SQL query:`;
   async generateResponse(
     question: string,
     queryResult: QueryResult,
-    generatedSql: string
+    generatedSql: string,
+    previousQuestion?: string
   ): Promise<{ text: string }> {
     const resultContext = this.formatResultsForLLM(queryResult);
     const markdownTable = this.formatResultsAsMarkdownTable(queryResult);
 
-    const prompt = `You are a data analyst assistant for local government. Provide INSIGHTFUL analysis, not just raw answers.
+    let conversationBlock = '';
+    if (previousQuestion) {
+      conversationBlock = `\nConversation context: The user previously asked "${previousQuestion}" and is now following up.\n`;
+    }
 
+    const prompt = `You are a data analyst assistant for local government. Provide INSIGHTFUL analysis, not just raw answers.
+${conversationBlock}
 The user asked: "${question}"
 
 SQL query executed: ${generatedSql}

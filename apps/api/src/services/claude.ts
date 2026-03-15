@@ -27,6 +27,18 @@ export class ClaudeService {
     userMessage: string,
     options?: { maxTokens?: number; temperature?: number }
   ): Promise<string> {
+    return this.chatMultiTurn(
+      system,
+      [{ role: 'user', content: userMessage }],
+      options
+    );
+  }
+
+  async chatMultiTurn(
+    system: string,
+    messages: ClaudeMessage[],
+    options?: { maxTokens?: number; temperature?: number }
+  ): Promise<string> {
     const maxTokens = options?.maxTokens ?? 1024;
     const temperature = options?.temperature ?? 1;
 
@@ -42,7 +54,7 @@ export class ClaudeService {
         max_tokens: maxTokens,
         temperature,
         system,
-        messages: [{ role: 'user', content: userMessage }] as ClaudeMessage[],
+        messages,
       }),
     });
 

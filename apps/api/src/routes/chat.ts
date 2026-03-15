@@ -91,10 +91,11 @@ chatRoutes.post('/', async (c) => {
 
   const conversationId = body.conversationId || crypto.randomUUID();
   const previousSql = body.previousSql;
+  const previousQuestion = body.previousQuestion;
   
   try {
     const { type: queryType, confidence } = determineQueryType(message, !!previousSql);
-    console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)}), hasPreviousSql: ${!!previousSql}, conversationId: ${conversationId}`);
+    console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)}), hasPreviousSql: ${!!previousSql}, previousQuestion: ${previousQuestion?.substring(0, 50) || 'none'}, conversationId: ${conversationId}`);
     
     if (queryType === 'sql' && c.env.AZURE_FUNCTION_URL) {
       console.log('Attempting Azure SQL query path via Function proxy...');
@@ -111,19 +112,33 @@ chatRoutes.post('/', async (c) => {
           const queryResult = await sqlService.queryWithNaturalLanguage(
             message,
             body.filters?.database,
-            previousSql
+            previousSql,
+            previousQuestion
           );
           result = queryResult.result;
           generatedSql = queryResult.generatedSql;
           usedContext = true;
         } catch (followUpError) {
-          console.error('Follow-up query failed, retrying without context:', followUpError);
-          const queryResult = await sqlService.queryWithNaturalLanguage(
-            message,
-            body.filters?.database
-          );
-          result = queryResult.result;
-          generatedSql = queryResult.generatedSql;
+          console.warn('Follow-up query with context failed, retrying with question context only:', followUpError);
+          try {
+            const retryQuestion = previousQuestion
+              ? `Based on the previous question "${previousQuestion}": ${message}`
+              : message;
+            const queryResult = await sqlService.queryWithNaturalLanguage(
+              retryQuestion,
+              body.filters?.database
+            );
+            result = queryResult.result;
+            generatedSql = queryResult.generatedSql;
+          } catch (retryError) {
+            console.error('Retry also failed, falling back to standalone query:', retryError);
+            const queryResult = await sqlService.queryWithNaturalLanguage(
+              message,
+              body.filters?.database
+            );
+            result = queryResult.result;
+            generatedSql = queryResult.generatedSql;
+          }
         }
       } else {
         const queryResult = await sqlService.queryWithNaturalLanguage(
@@ -136,7 +151,7 @@ chatRoutes.post('/', async (c) => {
       console.log(`SQL generated (usedContext=${usedContext}): ${generatedSql}`);
       console.log(`Query returned ${result.rowCount} rows`);
       
-      const { text } = await sqlService.generateResponse(message, result, generatedSql);
+      const { text } = await sqlService.generateResponse(message, result, generatedSql, previousQuestion);
       
       const chatResponse: ChatResponse = {
         response: text,
@@ -148,6 +163,7 @@ chatRoutes.post('/', async (c) => {
         }],
         conversationId,
         lastSql: generatedSql,
+        lastQuestion: message,
       };
       
       return c.json(chatResponse);
@@ -163,6 +179,7 @@ chatRoutes.post('/', async (c) => {
       response,
       sources,
       conversationId,
+      lastQuestion: message,
     };
 
     return c.json(result);
