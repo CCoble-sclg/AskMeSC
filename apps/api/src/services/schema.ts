@@ -121,7 +121,7 @@ export class SchemaService {
 
     try {
       const response = await fetch(
-        `${this.env.AZURE_FUNCTION_URL}/api/schema?database=${database || 'Animal'}&includeValues=true`, 
+        `${this.env.AZURE_FUNCTION_URL}/api/schema?database=${database || 'Animal'}`, 
         {
           headers: {
             'x-api-key': this.env.AZURE_FUNCTION_KEY,
