@@ -114,118 +114,123 @@ export class SchemaService {
   }
 
   async getSchemaContext(database?: string, searchTerms?: string[]): Promise<string> {
-    // Fetch schema directly from Azure Function (with relationships and sample values)
-    if (!this.env.AZURE_FUNCTION_URL || !this.env.AZURE_FUNCTION_KEY) {
-      return 'Azure Function not configured.';
+    // Try Azure Function first, fall back to static schema if unavailable
+    if (this.env.AZURE_FUNCTION_URL && this.env.AZURE_FUNCTION_KEY) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        
+        const response = await fetch(
+          `${this.env.AZURE_FUNCTION_URL}/api/schema?database=${database || 'Animal'}`, 
+          {
+            headers: {
+              'x-api-key': this.env.AZURE_FUNCTION_KEY,
+            },
+            signal: controller.signal,
+          }
+        );
+        
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          return this.parseSchemaResponse(await response.json(), searchTerms);
+        }
+      } catch (error) {
+        console.log('Azure Function unavailable, using static schema fallback');
+      }
     }
+    
+    // Fallback: Return static schema for Animal/Kennel database
+    return this.getStaticKennelSchema();
+  }
 
-    try {
-      const response = await fetch(
-        `${this.env.AZURE_FUNCTION_URL}/api/schema?database=${database || 'Animal'}`, 
-        {
-          headers: {
-            'x-api-key': this.env.AZURE_FUNCTION_KEY,
-          },
-        }
-      );
-      
-      if (!response.ok) {
-        console.error('Failed to fetch schema:', response.status);
-        return 'Failed to fetch database schema.';
-      }
-      
-      interface SchemaColumn {
-        name: string;
-        type: string;
-        nullable: boolean;
-        isPrimaryKey?: boolean;
-        sampleValues?: string[];
-      }
-      
-      interface SchemaTable {
-        name: string;
-        schema: string;
-        columns: SchemaColumn[];
-        foreignKeys?: Array<{ column: string; referencesTable: string; referencesColumn: string }>;
-        referencedBy?: Array<{ fromTable: string; fromColumn: string; toColumn: string }>;
-      }
-      
-      const data = await response.json() as { 
-        tables: SchemaTable[];
-        relationshipCount?: number;
-      };
-      
-      if (!data.tables || data.tables.length === 0) {
-        return 'No tables found in database.';
-      }
-      
-      // Build schema context from Azure Function response
-      const parts: string[] = [];
-      parts.push('DATABASE SCHEMA (auto-discovered from database):\n');
-      parts.push('IMPORTANT: Use square brackets for table and column names (e.g., [dbo].[TableName], [ColumnName])\n');
-      
-      // Prioritize tables based on search terms if provided
-      let tables = data.tables;
-      if (searchTerms && searchTerms.length > 0) {
-        tables = tables.sort((a, b) => {
-          let aScore = 0, bScore = 0;
-          for (const term of searchTerms) {
-            const termLower = term.toLowerCase();
-            if (a.name.toLowerCase().includes(termLower)) aScore += 5;
-            if (b.name.toLowerCase().includes(termLower)) bScore += 5;
-            // Also boost if columns match
-            for (const col of a.columns) {
-              if (col.name.toLowerCase().includes(termLower)) aScore += 1;
-            }
-            for (const col of b.columns) {
-              if (col.name.toLowerCase().includes(termLower)) bScore += 1;
-            }
-          }
-          return bScore - aScore;
-        });
-      }
-      
-      for (const table of tables.slice(0, 20)) {
-        parts.push(`\nTable: [${table.schema}].[${table.name}]`);
-        
-        // Show columns with sample values
-        parts.push(`  Columns:`);
-        for (const col of table.columns.slice(0, 12)) {
-          let colDesc = `    - [${col.name}] (${col.type})`;
-          if (col.isPrimaryKey) colDesc += ' PRIMARY KEY';
-          if (!col.nullable) colDesc += ' NOT NULL';
-          if (col.sampleValues && col.sampleValues.length > 0) {
-            colDesc += ` -- values: ${col.sampleValues.slice(0, 8).join(', ')}`;
-          }
-          parts.push(colDesc);
-        }
-        
-        if (table.columns.length > 12) {
-          parts.push(`    ... and ${table.columns.length - 12} more columns`);
-        }
-        
-        // Show foreign key relationships
-        if (table.foreignKeys && table.foreignKeys.length > 0) {
-          parts.push(`  Relationships (JOIN via):`);
-          for (const fk of table.foreignKeys.slice(0, 5)) {
-            parts.push(`    - [${fk.column}] -> ${fk.referencesTable}.[${fk.referencesColumn}]`);
-          }
-        }
-      }
-      
-      if (tables.length > 20) {
-        parts.push(`\n... and ${tables.length - 20} more tables`);
-      }
-      
-      if (data.relationshipCount) {
-        parts.push(`\nTotal relationships discovered: ${data.relationshipCount}`);
-      }
-      
-      return parts.join('\n');
-    } catch (error) {
-      console.error('Failed to fetch schema from Azure Function:', error);
-      return 'Error fetching database schema.';
+  private getStaticKennelSchema(): string {
+    return `DATABASE SCHEMA (Animal/Kennel Database):
+IMPORTANT: Use square brackets for table and column names (e.g., [dbo].[TableName], [ColumnName])
+
+Table: [dbo].[kennel]
+  Columns:
+    - [kennel_id] (int) PRIMARY KEY
+    - [animal_id] (int) - links to animal table
+    - [cage_number] (varchar)
+    - [date_in] (datetime)
+    - [date_out] (datetime) - NULL if still in kennel
+    - [status] (varchar)
+    - [notes] (text)
+
+Table: [dbo].[animal]
+  Columns:
+    - [animal_id] (int) PRIMARY KEY
+    - [animal_name] (varchar)
+    - [animal_type] (varchar) - DOG, CAT, etc.
+    - [breed] (varchar)
+    - [color] (varchar)
+    - [sex] (varchar)
+    - [age] (varchar)
+    - [weight] (decimal)
+    - [microchip] (varchar)
+
+Table: [dbo].[owner]
+  Columns:
+    - [owner_id] (int) PRIMARY KEY
+    - [first_name] (varchar)
+    - [last_name] (varchar)
+    - [address] (varchar)
+    - [city] (varchar)
+    - [phone] (varchar)
+
+Table: [dbo].[license]
+  Columns:
+    - [license_id] (int) PRIMARY KEY
+    - [animal_id] (int)
+    - [owner_id] (int)
+    - [license_number] (varchar)
+    - [issue_date] (datetime)
+    - [expiration_date] (datetime)
+    - [status] (varchar)
+
+NOTES:
+- To count animals currently in kennel: WHERE [date_out] IS NULL
+- Join kennel to animal via [animal_id]
+- Join license to animal and owner via respective IDs`;
+  }
+
+  private parseSchemaResponse(data: any, searchTerms?: string[]): string {
+    if (!data.tables || data.tables.length === 0) {
+      return this.getStaticKennelSchema();
     }
+    
+    const parts: string[] = [];
+    parts.push('DATABASE SCHEMA (from database):\n');
+    parts.push('IMPORTANT: Use square brackets for table and column names\n');
+    
+    let tables = data.tables;
+    if (searchTerms && searchTerms.length > 0) {
+      tables = [...tables].sort((a: any, b: any) => {
+        let aScore = 0, bScore = 0;
+        for (const term of searchTerms) {
+          const termLower = term.toLowerCase();
+          if (a.name.toLowerCase().includes(termLower)) aScore += 5;
+          if (b.name.toLowerCase().includes(termLower)) bScore += 5;
+        }
+        return bScore - aScore;
+      });
+    }
+    
+    for (const table of tables.slice(0, 20)) {
+      parts.push(`\nTable: [${table.schema}].[${table.name}]`);
+      parts.push(`  Columns:`);
+      for (const col of table.columns.slice(0, 12)) {
+        let colDesc = `    - [${col.name}] (${col.type})`;
+        if (col.isPrimaryKey) colDesc += ' PRIMARY KEY';
+        parts.push(colDesc);
+      }
+      if (table.columns.length > 12) {
+        parts.push(`    ... and ${table.columns.length - 12} more columns`);
+      }
+    }
+    
+    return parts.join('\n');
   }
 
   async deleteSchema(database: string, tableName: string): Promise<void> {
