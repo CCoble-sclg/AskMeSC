@@ -115,6 +115,29 @@ DATE FUNCTIONS (T-SQL):
 - Group by day: CAST([Col] AS DATE)
 - Group by month: FORMAT([Col], 'yyyy-MM')
 
+ANIMAL DATABASE DOMAIN KNOWLEDGE (CRITICAL):
+This database tracks animal shelter operations. Key concepts:
+
+1. INTAKE = animals "taken in" or "received":
+   - Query: [SYSADM].[activity] table WHERE [activity_type] IN ('STRAY', 'OWNED', 'RESCUE', 'PROT CUST')
+   - STRAY = stray animals found/brought in
+   - OWNED = owner surrenders  
+   - RESCUE = rescue transfers
+   - PROT CUST = protective custody
+   
+2. Activity types that are NOT intakes (EXCLUDE from intake counts):
+   - INV = investigations (not an intake)
+   - OTHER = miscellaneous (not an intake)
+   - WILD = wildlife encounters (not an intake)
+   - TRANSPORT = animal transport (not an intake)
+   
+3. Key columns in [SYSADM].[activity]:
+   - [activity_date] = date of activity (use for date filtering)
+   - [activity_type] = type of activity
+   - [animal_id] = links to animal record
+
+4. For unique animal counts, consider using DISTINCT on [animal_id] to avoid duplicates
+
 ${schemaContext}
 
 User question: ${question}
