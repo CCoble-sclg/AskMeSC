@@ -149,7 +149,7 @@ export async function queryHandler(request: HttpRequest, context: InvocationCont
   }
 }
 
-// Schema endpoint to get table information
+// Schema endpoint to get table information with relationships and sample values
 export async function schemaHandler(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   context.log('SQL Proxy schema request received');
   
@@ -165,6 +165,7 @@ export async function schemaHandler(request: HttpRequest, context: InvocationCon
   
   try {
     const dbName = request.query.get('database');
+    const includeValues = request.query.get('includeValues') === 'true';
     
     if (!dbName) {
       return {
@@ -197,6 +198,21 @@ export async function schemaHandler(request: HttpRequest, context: InvocationCon
       ORDER BY s.name, t.name, c.column_id
     `);
     
+    // Get foreign key relationships
+    const fkResult = await pool.request().query(`
+      SELECT 
+        OBJECT_SCHEMA_NAME(fk.parent_object_id) AS from_schema,
+        OBJECT_NAME(fk.parent_object_id) AS from_table,
+        COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS from_column,
+        OBJECT_SCHEMA_NAME(fk.referenced_object_id) AS to_schema,
+        OBJECT_NAME(fk.referenced_object_id) AS to_table,
+        COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS to_column,
+        fk.name AS fk_name
+      FROM sys.foreign_keys fk
+      INNER JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
+      ORDER BY from_schema, from_table, fk.name
+    `);
+    
     // Group by table
     const tables: Record<string, any> = {};
     for (const row of tablesResult.recordset) {
@@ -206,7 +222,9 @@ export async function schemaHandler(request: HttpRequest, context: InvocationCon
           schema: row.schema_name,
           name: row.table_name,
           fullName,
-          columns: []
+          columns: [],
+          foreignKeys: [],
+          referencedBy: []
         };
       }
       tables[fullName].columns.push({
@@ -217,11 +235,61 @@ export async function schemaHandler(request: HttpRequest, context: InvocationCon
       });
     }
     
+    // Add foreign key relationships
+    for (const fk of fkResult.recordset) {
+      const fromTable = `${fk.from_schema}.${fk.from_table}`;
+      const toTable = `${fk.to_schema}.${fk.to_table}`;
+      
+      if (tables[fromTable]) {
+        tables[fromTable].foreignKeys.push({
+          column: fk.from_column,
+          referencesTable: toTable,
+          referencesColumn: fk.to_column
+        });
+      }
+      
+      if (tables[toTable]) {
+        tables[toTable].referencedBy.push({
+          fromTable: fromTable,
+          fromColumn: fk.from_column,
+          toColumn: fk.to_column
+        });
+      }
+    }
+    
+    // Get sample values for key columns (like 'type', 'status', 'category' columns)
+    if (includeValues) {
+      for (const tableName of Object.keys(tables)) {
+        const table = tables[tableName];
+        for (const col of table.columns) {
+          // Only get distinct values for likely categorical columns
+          if (col.type === 'varchar' || col.type === 'nvarchar' || col.type === 'char') {
+            const colNameLower = col.name.toLowerCase();
+            if (colNameLower.includes('type') || colNameLower.includes('status') || 
+                colNameLower.includes('category') || colNameLower.includes('code')) {
+              try {
+                const valuesResult = await pool.request().query(`
+                  SELECT TOP 20 DISTINCT [${col.name}] as val 
+                  FROM [${table.schema}].[${table.name}] 
+                  WHERE [${col.name}] IS NOT NULL
+                  ORDER BY [${col.name}]
+                `);
+                col.sampleValues = valuesResult.recordset.map((r: any) => r.val);
+              } catch (e) {
+                // Skip if we can't query this column
+              }
+            }
+          }
+        }
+      }
+    }
+    
     return {
       status: 200,
       jsonBody: {
         database: dbName,
-        tables: Object.values(tables)
+        tables: Object.values(tables),
+        relationshipCount: fkResult.recordset.length
       }
     };
   } catch (error: any) {

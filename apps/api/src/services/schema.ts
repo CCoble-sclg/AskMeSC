@@ -114,24 +114,46 @@ export class SchemaService {
   }
 
   async getSchemaContext(database?: string, searchTerms?: string[]): Promise<string> {
-    // Fetch schema directly from Azure Function
+    // Fetch schema directly from Azure Function (with relationships and sample values)
     if (!this.env.AZURE_FUNCTION_URL || !this.env.AZURE_FUNCTION_KEY) {
       return 'Azure Function not configured.';
     }
 
     try {
-      const response = await fetch(`${this.env.AZURE_FUNCTION_URL}/api/schema?database=${database || 'Animal'}`, {
-        headers: {
-          'x-api-key': this.env.AZURE_FUNCTION_KEY,
-        },
-      });
+      const response = await fetch(
+        `${this.env.AZURE_FUNCTION_URL}/api/schema?database=${database || 'Animal'}&includeValues=true`, 
+        {
+          headers: {
+            'x-api-key': this.env.AZURE_FUNCTION_KEY,
+          },
+        }
+      );
       
       if (!response.ok) {
         console.error('Failed to fetch schema:', response.status);
         return 'Failed to fetch database schema.';
       }
       
-      const data = await response.json() as { tables: Array<{ name: string; schema: string; columns: Array<{ name: string; type: string; nullable: boolean }> }> };
+      interface SchemaColumn {
+        name: string;
+        type: string;
+        nullable: boolean;
+        isPrimaryKey?: boolean;
+        sampleValues?: string[];
+      }
+      
+      interface SchemaTable {
+        name: string;
+        schema: string;
+        columns: SchemaColumn[];
+        foreignKeys?: Array<{ column: string; referencesTable: string; referencesColumn: string }>;
+        referencedBy?: Array<{ fromTable: string; fromColumn: string; toColumn: string }>;
+      }
+      
+      const data = await response.json() as { 
+        tables: SchemaTable[];
+        relationshipCount?: number;
+      };
       
       if (!data.tables || data.tables.length === 0) {
         return 'No tables found in database.';
@@ -139,40 +161,64 @@ export class SchemaService {
       
       // Build schema context from Azure Function response
       const parts: string[] = [];
-      parts.push('Available database tables:\n');
+      parts.push('DATABASE SCHEMA (auto-discovered from database):\n');
       parts.push('IMPORTANT: Use square brackets for table and column names (e.g., [dbo].[TableName], [ColumnName])\n');
       
       // Prioritize tables based on search terms if provided
       let tables = data.tables;
       if (searchTerms && searchTerms.length > 0) {
         tables = tables.sort((a, b) => {
-          const aScore = searchTerms.some(term => 
-            a.name.toLowerCase().includes(term.toLowerCase())
-          ) ? 1 : 0;
-          const bScore = searchTerms.some(term => 
-            b.name.toLowerCase().includes(term.toLowerCase())
-          ) ? 1 : 0;
+          let aScore = 0, bScore = 0;
+          for (const term of searchTerms) {
+            const termLower = term.toLowerCase();
+            if (a.name.toLowerCase().includes(termLower)) aScore += 5;
+            if (b.name.toLowerCase().includes(termLower)) bScore += 5;
+            // Also boost if columns match
+            for (const col of a.columns) {
+              if (col.name.toLowerCase().includes(termLower)) aScore += 1;
+            }
+            for (const col of b.columns) {
+              if (col.name.toLowerCase().includes(termLower)) bScore += 1;
+            }
+          }
           return bScore - aScore;
         });
       }
       
-      for (const table of tables.slice(0, 25)) {
+      for (const table of tables.slice(0, 20)) {
         parts.push(`\nTable: [${table.schema}].[${table.name}]`);
-        parts.push(`  Columns:`);
         
-        for (const col of table.columns.slice(0, 15)) {
+        // Show columns with sample values
+        parts.push(`  Columns:`);
+        for (const col of table.columns.slice(0, 12)) {
           let colDesc = `    - [${col.name}] (${col.type})`;
+          if (col.isPrimaryKey) colDesc += ' PRIMARY KEY';
           if (!col.nullable) colDesc += ' NOT NULL';
+          if (col.sampleValues && col.sampleValues.length > 0) {
+            colDesc += ` -- values: ${col.sampleValues.slice(0, 8).join(', ')}`;
+          }
           parts.push(colDesc);
         }
         
-        if (table.columns.length > 15) {
-          parts.push(`    ... and ${table.columns.length - 15} more columns`);
+        if (table.columns.length > 12) {
+          parts.push(`    ... and ${table.columns.length - 12} more columns`);
+        }
+        
+        // Show foreign key relationships
+        if (table.foreignKeys && table.foreignKeys.length > 0) {
+          parts.push(`  Relationships (JOIN via):`);
+          for (const fk of table.foreignKeys.slice(0, 5)) {
+            parts.push(`    - [${fk.column}] -> ${fk.referencesTable}.[${fk.referencesColumn}]`);
+          }
         }
       }
       
-      if (tables.length > 25) {
-        parts.push(`\n... and ${tables.length - 25} more tables`);
+      if (tables.length > 20) {
+        parts.push(`\n... and ${tables.length - 20} more tables`);
+      }
+      
+      if (data.relationshipCount) {
+        parts.push(`\nTotal relationships discovered: ${data.relationshipCount}`);
       }
       
       return parts.join('\n');
