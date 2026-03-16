@@ -1,6 +1,8 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import * as sql from "mssql";
 
+// Azure Function SQL Proxy - v1.1
+
 interface QueryRequest {
   database: string;
   query: string;
