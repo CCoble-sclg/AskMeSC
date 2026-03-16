@@ -116,10 +116,11 @@ DATE FUNCTIONS (T-SQL):
 - Group by month: FORMAT([Col], 'yyyy-MM')
 
 ANIMAL DATABASE DOMAIN KNOWLEDGE (CRITICAL):
-This database tracks animal shelter operations. Key concepts:
+This database tracks animal shelter operations. Tables use [dbo] schema.
 
 1. INTAKE = animals "taken in" or "received":
-   - Query: [SYSADM].[activity] table WHERE [activity_type] IN ('STRAY', 'OWNED', 'RESCUE', 'PROT CUST')
+   - Query: [dbo].[activity] table
+   - Filter: WHERE [activity_type] IN ('STRAY', 'OWNED', 'RESCUE', 'PROT CUST')
    - STRAY = stray animals found/brought in
    - OWNED = owner surrenders  
    - RESCUE = rescue transfers
@@ -131,12 +132,14 @@ This database tracks animal shelter operations. Key concepts:
    - WILD = wildlife encounters (not an intake)
    - TRANSPORT = animal transport (not an intake)
    
-3. Key columns in [SYSADM].[activity]:
+3. Key columns in [dbo].[activity]:
    - [activity_date] = date of activity (use for date filtering)
    - [activity_type] = type of activity
    - [animal_id] = links to animal record
 
-4. For unique animal counts, consider using DISTINCT on [animal_id] to avoid duplicates
+4. For unique animal counts, use COUNT(DISTINCT [animal_id]) to avoid duplicates
+
+5. DATA TIMEFRAME: This database contains historical data through early 2022. "Last month" or recent date queries will return 0 results. For testing, use historical dates like "February 2021" or "2021".
 
 ${schemaContext}
 
