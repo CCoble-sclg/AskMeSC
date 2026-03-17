@@ -6,7 +6,9 @@
   <header>
     <div class="header-content">
       <div class="brand">
-        <img src="/stanly-county-logo.png" alt="Stanly County" class="county-logo" />
+        <div class="logo-text">
+          <span class="county-name">Stanly County</span>
+        </div>
         <div class="title-group">
           <h1>AskMeSC</h1>
           <p class="tagline">Your AI Assistant for Stanly County Public Records</p>
@@ -51,12 +53,22 @@
     gap: 1rem;
   }
 
-  .county-logo {
-    height: 55px;
-    width: auto;
-    background: rgba(255, 255, 255, 0.95);
-    padding: 6px 10px;
-    border-radius: 6px;
+  .logo-text {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 16px;
+    border: 2px solid var(--primary);
+    border-radius: 8px;
+    background: rgba(0, 124, 186, 0.15);
+  }
+
+  .county-name {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--primary-bright);
+    text-transform: uppercase;
+    letter-spacing: 2px;
   }
 
   .title-group {
