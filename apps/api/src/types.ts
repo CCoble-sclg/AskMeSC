@@ -36,6 +36,7 @@ export interface ChatRequest {
   conversationId?: string;
   previousSql?: string;
   previousQuestion?: string;
+  useAgent?: boolean;  // Enable agentic multi-step query mode
   filters?: {
     database?: string;
     tables?: string[];

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, ChatRequest, ChatResponse, Source, QueryType } from '../types';
 import { RagService } from '../services/rag';
 import { SqlService } from '../services/sql';
+import { AgentSqlService } from '../services/agent-sql';
 import { SchemaService } from '../services/schema';
 import { RateLimitError } from '../services/claude';
 
@@ -101,6 +102,44 @@ chatRoutes.post('/', async (c) => {
     if (queryType === 'sql' && c.env.AZURE_FUNCTION_URL) {
       console.log('Attempting Azure SQL query path via Function proxy...');
 
+      // Use agent mode for new queries (no previous context) or when explicitly requested
+      const useAgentMode = body.useAgent !== false && !previousSql;
+      
+      if (useAgentMode) {
+        console.log('Using AGENT mode for multi-step query exploration...');
+        const agentService = new AgentSqlService(c.env);
+        
+        try {
+          const { answer, steps, finalSql } = await agentService.queryWithAgent(message);
+          
+          console.log(`Agent completed with ${steps.length} steps`);
+          
+          // Build source info from agent steps
+          const sources: Source[] = [{
+            table: 'Agent Analysis',
+            id: 'agent',
+            snippet: finalSql || `Explored database in ${steps.length} steps`,
+            score: confidence,
+          }];
+          
+          const chatResponse: ChatResponse = {
+            response: answer,
+            sources,
+            conversationId,
+            lastSql: finalSql,
+            lastQuestion: message,
+          };
+          
+          return c.json(chatResponse);
+        } catch (agentError) {
+          if (agentError instanceof RateLimitError) throw agentError;
+          console.warn('Agent mode failed, falling back to simple query:', agentError);
+          // Fall through to simple query mode
+        }
+      }
+      
+      // Simple query mode (follow-ups or fallback)
+      console.log('Using SIMPLE mode for direct query...');
       const sqlService = new SqlService(c.env);
       
       let result: Awaited<ReturnType<typeof sqlService.queryWithNaturalLanguage>>['result'];
