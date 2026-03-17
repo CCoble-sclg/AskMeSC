@@ -1,7 +1,7 @@
 import type { Env, QueryResult } from '../types';
 import { ClaudeService } from './claude';
 
-const MAX_ITERATIONS = 5;
+const MAX_ITERATIONS = 10;
 const MAX_ROWS = 50;
 
 interface AgentTool {
@@ -84,13 +84,24 @@ export class AgentSqlService {
 
   private async listTables(): Promise<string> {
     try {
+      console.log('Agent: Fetching tables from:', `${this.env.AZURE_FUNCTION_URL}/api/schema?database=Animal`);
+      
       const response = await fetch(
         `${this.env.AZURE_FUNCTION_URL}/api/schema?database=Animal`,
         { headers: { 'x-api-key': this.env.AZURE_FUNCTION_KEY } }
       );
-      const data = await response.json();
       
-      if (!data.tables) return 'No tables found';
+      if (!response.ok) {
+        console.error('Agent: Schema fetch failed:', response.status, response.statusText);
+        return `Error fetching schema: HTTP ${response.status}`;
+      }
+      
+      const data = await response.json();
+      console.log('Agent: Schema response has tables:', !!data.tables, 'count:', data.tables?.length);
+      
+      if (!data.tables || data.tables.length === 0) {
+        return 'No tables found in database. The database may be empty or there was a connection issue.';
+      }
       
       const tableList = data.tables.map((t: any) => 
         `[${t.schema}].[${t.name}] - ${t.columns?.length || 0} columns`
@@ -98,6 +109,7 @@ export class AgentSqlService {
       
       return `Tables in database:\n${tableList}`;
     } catch (e) {
+      console.error('Agent: Error in listTables:', e);
       return `Error listing tables: ${e}`;
     }
   }
