@@ -130,7 +130,17 @@ CRITICAL: For questions about "animals in the kennel" or "how many animals curre
 - location='WEB' means web/online entries (NOT physical animals - ignore these)
 - outcome_date IS NULL means animal has not been released yet
 
+OUTCOME TYPES (outcome_type column):
+- 'EUTH' = Euthanized - for euthanasia queries use: WHERE outcome_type = 'EUTH'
+- 'ADOPT' = Adopted
+- 'RTO' = Return to Owner
+- 'TRANSFER' = Transferred
+- 'DIED' = Died naturally
+
+INTAKE TYPES (intake_type column): 'STRAY', 'OWNED', 'RESCUE'
+
 For unique animal counts, use COUNT(DISTINCT [animal_id]) to avoid duplicates.
+NOTE: Database has current 2026 data. Use date filters like outcome_date >= '2026-01-01'.
 
 ${schemaContext}
 

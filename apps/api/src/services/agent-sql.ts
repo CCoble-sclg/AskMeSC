@@ -142,7 +142,23 @@ CRITICAL DOMAIN KNOWLEDGE FOR KENNEL TABLE:
 - location='SHELTER' = physically at shelter (~40 animals)
 - location='WEB' = online/web entries (13,000+ - NOT physical animals)
 - kennel_stat values: 'STRAY WAIT', 'AVAILABLE', 'EVALUATION', 'UNAVAIL'
-- Data is historical through early 2022.`;
+
+OUTCOME TYPES (outcome_type column):
+- 'EUTH' = Euthanized
+- 'ADOPT' = Adopted
+- 'RTO' = Return to Owner
+- 'TRANSFER' = Transferred to another facility
+- 'DIED' = Died naturally
+
+For euthanasia queries: WHERE outcome_type = 'EUTH'
+For adoptions: WHERE outcome_type = 'ADOPT'
+
+INTAKE TYPES (intake_type column):
+- 'STRAY' = Stray animal
+- 'OWNED' = Owner surrender
+- 'RESCUE' = Rescue intake
+
+NOTE: Data includes current year 2026 data. Use appropriate date filters.`;
   }
 
   private async describeTable(tableName: string): Promise<string> {
@@ -276,12 +292,21 @@ CRITICAL DOMAIN KNOWLEDGE FOR KENNEL TABLE:
 AVAILABLE TOOLS:
 ${toolDescriptions}
 
-IMPORTANT GUIDELINES:
-- Start by exploring: list_tables, then describe_table for relevant tables
-- Use sample_values to understand what data exists in key columns (especially status/type columns)
-- Only run_query when you understand the schema and data values
-- Think step by step - each exploration helps you understand the data better
-- When you have enough information, use final_answer to respond
+CRITICAL GUIDELINES:
+1. EXPLORE BEFORE QUERYING:
+   - First: list_tables to see available tables
+   - Then: describe_table for relevant tables to see columns
+   - IMPORTANT: Use sample_values on ANY column that might contain codes/types/statuses
+     (e.g., outcome_type, intake_type, status, type columns)
+   
+2. NEVER ASSUME COLUMN VALUES:
+   - If a question mentions "euthanized", "adopted", "stray", etc., you MUST sample_values 
+     to find the actual codes used (e.g., 'EUTH', 'ADOPT', 'STRAY')
+   - Don't guess - explore the data first!
+
+3. ONLY run_query when you understand BOTH the schema AND the actual data values
+
+4. When you have enough information, use final_answer
 
 USER QUESTION: ${question}
 
