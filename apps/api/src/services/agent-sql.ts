@@ -84,23 +84,32 @@ export class AgentSqlService {
 
   private async listTables(): Promise<string> {
     try {
-      console.log('Agent: Fetching tables from:', `${this.env.AZURE_FUNCTION_URL}/api/schema?database=Animal`);
+      console.log('Agent: Fetching tables from schema endpoint...');
+      
+      // Use AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
       
       const response = await fetch(
         `${this.env.AZURE_FUNCTION_URL}/api/schema?database=Animal`,
-        { headers: { 'x-api-key': this.env.AZURE_FUNCTION_KEY } }
+        { 
+          headers: { 'x-api-key': this.env.AZURE_FUNCTION_KEY },
+          signal: controller.signal
+        }
       );
       
+      clearTimeout(timeoutId);
+      
       if (!response.ok) {
-        console.error('Agent: Schema fetch failed:', response.status, response.statusText);
-        return `Error fetching schema: HTTP ${response.status}`;
+        console.error('Agent: Schema fetch failed:', response.status);
+        return this.getStaticTableList();
       }
       
       const data = await response.json();
-      console.log('Agent: Schema response has tables:', !!data.tables, 'count:', data.tables?.length);
+      console.log('Agent: Schema response has tables:', data.tables?.length);
       
       if (!data.tables || data.tables.length === 0) {
-        return 'No tables found in database. The database may be empty or there was a connection issue.';
+        return this.getStaticTableList();
       }
       
       const tableList = data.tables.map((t: any) => 
@@ -109,32 +118,42 @@ export class AgentSqlService {
       
       return `Tables in database:\n${tableList}`;
     } catch (e) {
-      console.error('Agent: Error in listTables:', e);
-      return `Error listing tables: ${e}`;
+      console.error('Agent: Error in listTables, using static fallback:', e);
+      return this.getStaticTableList();
     }
+  }
+
+  private getStaticTableList(): string {
+    return `Tables in database (known tables):
+[dbo].[kennel] - Kennel/cage assignments for animals
+[dbo].[animal] - Animal records (dogs, cats, etc.)
+[dbo].[owner] - Pet owner information
+[dbo].[license] - Pet license records
+
+Use describe_table to get column details for any table.`;
   }
 
   private async describeTable(tableName: string): Promise<string> {
     try {
-      const response = await fetch(
-        `${this.env.AZURE_FUNCTION_URL}/api/schema?database=Animal`,
-        { headers: { 'x-api-key': this.env.AZURE_FUNCTION_KEY } }
-      );
-      const data = await response.json();
+      // Try to get schema from query (faster than schema endpoint)
+      const cleanTable = tableName.replace(/[\[\]]/g, '');
+      const schema = cleanTable.includes('.') ? cleanTable.split('.')[0] : 'dbo';
+      const name = cleanTable.includes('.') ? cleanTable.split('.')[1] : cleanTable;
       
-      const searchName = tableName.toLowerCase().replace(/[\[\]]/g, '').replace('dbo.', '');
-      const table = data.tables?.find((t: any) => 
-        t.name.toLowerCase() === searchName || 
-        `${t.schema}.${t.name}`.toLowerCase() === searchName
-      );
+      // Query column info directly - much faster than schema endpoint
+      const sql = `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '${schema}' AND TABLE_NAME = '${name}' ORDER BY ORDINAL_POSITION`;
       
-      if (!table) return `Table "${tableName}" not found`;
+      const result = await this.callAzureFunction('query', { database: 'Animal', query: sql });
       
-      const columns = table.columns.map((c: any) => 
-        `  - [${c.name}] (${c.type})${c.isPrimaryKey ? ' PRIMARY KEY' : ''}${!c.nullable ? ' NOT NULL' : ''}`
+      if (result.error || !result.rows?.length) {
+        return `Table [${schema}].[${name}] not found or empty`;
+      }
+      
+      const columns = result.rows.map((c: any) => 
+        `  - [${c.COLUMN_NAME}] (${c.DATA_TYPE})${c.IS_NULLABLE === 'NO' ? ' NOT NULL' : ''}`
       ).join('\n');
       
-      return `Table [${table.schema}].[${table.name}]:\n${columns}`;
+      return `Table [${schema}].[${name}]:\n${columns}`;
     } catch (e) {
       return `Error describing table: ${e}`;
     }
