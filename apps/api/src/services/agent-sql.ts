@@ -136,12 +136,16 @@ export class AgentSqlService {
 
 Other tables: animal_history, kennel_history, person_history, memo, receipt, todo, event, schedule
 
-CRITICAL DOMAIN KNOWLEDGE FOR KENNEL TABLE:
-- For "animals currently in the kennel" or "how many animals": 
-  Use: WHERE outcome_date IS NULL AND location = 'SHELTER'
-- location='SHELTER' = physically at shelter (~40 animals)
-- location='WEB' = online/web entries (13,000+ - NOT physical animals)
-- kennel_stat values: 'STRAY WAIT', 'AVAILABLE', 'EVALUATION', 'UNAVAIL'
+***** CRITICAL - READ THIS FIRST *****
+For "animals currently in the kennel/shelter" or "how many animals":
+ALWAYS USE: WHERE outcome_date IS NULL AND location = 'SHELTER'
+
+The location column is ESSENTIAL:
+- location = 'SHELTER' = PHYSICAL animals at shelter (approximately 40-50)
+- location = 'WEB' = Web entries, NOT real animals (13,000+ records - IGNORE THESE)
+
+Without location = 'SHELTER', you will get 13,000+ wrong results!
+*************************************
 
 OUTCOME TYPES (outcome_type column):
 - 'EUTH' = Euthanized
@@ -293,18 +297,18 @@ AVAILABLE TOOLS:
 ${toolDescriptions}
 
 CRITICAL GUIDELINES:
-1. EXPLORE BEFORE QUERYING:
-   - First: list_tables to see available tables
-   - Then: describe_table for relevant tables to see columns
-   - IMPORTANT: Use sample_values on ANY column that might contain codes/types/statuses
-     (e.g., outcome_type, intake_type, status, type columns)
-   
-2. NEVER ASSUME COLUMN VALUES:
-   - If a question mentions "euthanized", "adopted", "stray", etc., you MUST sample_values 
-     to find the actual codes used (e.g., 'EUTH', 'ADOPT', 'STRAY')
-   - Don't guess - explore the data first!
+1. FIRST: Call list_tables - it contains CRITICAL DOMAIN KNOWLEDGE you MUST follow!
+   - The domain knowledge tells you EXACTLY how to query for common questions
+   - READ IT CAREFULLY before doing anything else
 
-3. ONLY run_query when you understand BOTH the schema AND the actual data values
+2. For "animals in shelter/kennel" questions:
+   - You MUST use: WHERE outcome_date IS NULL AND location = 'SHELTER'
+   - Without location='SHELTER' you will get 13,000+ wrong results (web entries)
+   - Correct answer is approximately 40-50 animals
+
+3. EXPLORE DATA VALUES:
+   - Use sample_values on status/type columns to find codes
+   - Don't guess values - explore first
 
 4. When you have enough information, use final_answer
 
