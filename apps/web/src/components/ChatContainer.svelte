@@ -79,14 +79,14 @@
     {#if messages.length === 0}
       <div class="welcome">
         <h2>Welcome to AskMeSC</h2>
-        <p>I can help you find information about:</p>
+        <p>I can help you find information about Stanly County:</p>
         <ul>
-          <li>Building permits and zoning</li>
+          <li>Animal shelter and kennel records</li>
+          <li>Pet licenses and registrations</li>
           <li>Public records and documents</li>
-          <li>City services and departments</li>
-          <li>Local regulations and ordinances</li>
+          <li>County services and departments</li>
         </ul>
-        <p class="hint">Try asking: "What permits were issued last month?"</p>
+        <p class="hint">Try asking: "How many animals are currently in the kennel?"</p>
       </div>
     {:else}
       {#each messages as message (message.id)}

@@ -42,7 +42,7 @@
       bind:value={input}
       onkeydown={handleKeyDown}
       oninput={handleInput}
-      placeholder="Ask a question about public records..."
+      placeholder="Ask about Stanly County records..."
       rows="1"
       {disabled}
     ></textarea>
@@ -99,8 +99,13 @@
     font-size: 1rem;
     line-height: 1.5;
     background: transparent;
+    color: var(--text);
     min-height: 24px;
     max-height: 150px;
+  }
+
+  textarea::placeholder {
+    color: var(--text-secondary);
   }
 
   textarea:disabled {
@@ -140,10 +145,11 @@
     background: transparent;
     padding: 0.5rem;
     font-size: 1rem;
+    color: var(--text-secondary);
   }
 
   .clear-btn:hover {
-    background: var(--background);
+    background: var(--border);
   }
 
   .disclaimer {

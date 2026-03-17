@@ -1,16 +1,23 @@
 :root {
-  --primary: #2563eb;
-  --primary-dark: #1d4ed8;
-  --secondary: #64748b;
-  --background: #f8fafc;
-  --surface: #ffffff;
-  --text: #1e293b;
-  --text-secondary: #64748b;
-  --border: #e2e8f0;
-  --success: #22c55e;
+  /* Stanly County Brand Colors - Dark Theme */
+  --primary: #007CBA;           /* Blue */
+  --primary-dark: #002B49;      /* Dark Blue */
+  --primary-bright: #00A1DF;    /* Bright Blue */
+  --accent: #82BC00;            /* Bright Green */
+  --accent-dark: #799900;       /* Dark Green */
+  --secondary: #A4A9AD;         /* Grey */
+  
+  /* Dark Theme */
+  --background: #0a0f14;        /* Very dark blue-black */
+  --surface: #111922;           /* Dark surface */
+  --surface-elevated: #1a2633;  /* Slightly lighter surface */
+  --text: #f0f4f8;              /* Light text */
+  --text-secondary: #8b9db0;    /* Muted text */
+  --border: #2a3a4a;            /* Dark border */
+  --success: #82BC00;           /* Bright Green */
   --error: #ef4444;
   --radius: 12px;
-  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3);
 }
 
 * {
@@ -52,7 +59,7 @@ a:hover {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--background);
+  background: var(--surface);
 }
 
 ::-webkit-scrollbar-thumb {
@@ -61,5 +68,5 @@ a:hover {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--secondary);
+  background: var(--primary);
 }

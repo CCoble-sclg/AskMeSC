@@ -88,9 +88,9 @@
   }
 
   .message.error .content {
-    background: #fef2f2;
+    background: rgba(239, 68, 68, 0.15);
     border-color: var(--error);
-    color: var(--error);
+    color: #fca5a5;
   }
 
   .text {

@@ -80,15 +80,16 @@
   }
 
   .markdown-content :global(tbody tr:hover) {
-    background: rgba(79, 70, 229, 0.05);
+    background: rgba(0, 124, 186, 0.15);
   }
 
   .markdown-content :global(tbody tr:nth-child(even)) {
-    background: rgba(0, 0, 0, 0.02);
+    background: rgba(255, 255, 255, 0.03);
   }
 
   .markdown-content :global(code) {
-    background: rgba(0, 0, 0, 0.05);
+    background: rgba(0, 124, 186, 0.2);
+    color: var(--primary-bright);
     padding: 0.125em 0.375em;
     border-radius: 4px;
     font-size: 0.9em;
