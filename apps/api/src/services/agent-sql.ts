@@ -143,25 +143,38 @@ Data is historical through early 2022.`;
 
   private async describeTable(tableName: string): Promise<string> {
     try {
-      // Try to get schema from query (faster than schema endpoint)
       const cleanTable = tableName.replace(/[\[\]]/g, '');
-      const schema = cleanTable.includes('.') ? cleanTable.split('.')[0] : 'dbo';
       const name = cleanTable.includes('.') ? cleanTable.split('.')[1] : cleanTable;
       
-      // Query column info directly - much faster than schema endpoint
-      const sql = `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '${schema}' AND TABLE_NAME = '${name}' ORDER BY ORDINAL_POSITION`;
+      // Use SELECT TOP 0 to get column names without data - fast and reliable
+      const sql = `SELECT TOP 0 * FROM [${name}]`;
       
       const result = await this.callAzureFunction('query', { database: 'Animal', query: sql });
       
-      if (result.error || !result.rows?.length) {
-        return `Table [${schema}].[${name}] not found or empty`;
+      if (result.error) {
+        // Try fallback: get one row and infer columns
+        const fallbackSql = `SELECT TOP 1 * FROM [${name}]`;
+        const fallbackResult = await this.callAzureFunction('query', { database: 'Animal', query: fallbackSql });
+        
+        if (fallbackResult.error || !fallbackResult.rows?.length) {
+          return `Table [${name}] not found or query error: ${result.error || fallbackResult.error}`;
+        }
+        
+        const columns = Object.keys(fallbackResult.rows[0]).map(col => `  - [${col}]`).join('\n');
+        return `Table [dbo].[${name}]:\n${columns}`;
       }
       
-      const columns = result.rows.map((c: any) => 
-        `  - [${c.COLUMN_NAME}] (${c.DATA_TYPE})${c.IS_NULLABLE === 'NO' ? ' NOT NULL' : ''}`
-      ).join('\n');
+      // For TOP 0, columns are in the metadata - but we need to get them differently
+      // Let's just get 1 row and extract column names
+      const sampleSql = `SELECT TOP 1 * FROM [${name}]`;
+      const sampleResult = await this.callAzureFunction('query', { database: 'Animal', query: sampleSql });
       
-      return `Table [${schema}].[${name}]:\n${columns}`;
+      if (!sampleResult.rows?.length) {
+        return `Table [dbo].[${name}] exists but appears empty`;
+      }
+      
+      const columns = Object.keys(sampleResult.rows[0]).map(col => `  - [${col}]`).join('\n');
+      return `Table [dbo].[${name}]:\n${columns}`;
     } catch (e) {
       return `Error describing table: ${e}`;
     }
