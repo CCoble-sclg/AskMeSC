@@ -121,12 +121,14 @@ This database tracks animal shelter KENNEL operations. Tables use [dbo] schema.
 Key tables for kennel operations:
 - [dbo].[kennel] - Animals currently or previously in the kennel
 - [dbo].[animal] - Animal records (dogs, cats, etc.)
-- [dbo].[owner] - Pet owner information
-- [dbo].[license] - Pet license records
+- [dbo].[person] - Pet owner/contact information
+- [dbo].[tag] - Pet license/tag records
 
-For questions about "animals in the kennel" or "how many animals":
-- Query the [dbo].[kennel] table
-- Check for status columns that indicate current vs. released animals
+CRITICAL: For questions about "animals in the kennel" or "how many animals currently":
+- Query: SELECT COUNT(*) FROM [dbo].[kennel] WHERE outcome_date IS NULL AND location = 'SHELTER'
+- location='SHELTER' means physically at the shelter (~40 animals)
+- location='WEB' means web/online entries (NOT physical animals - ignore these)
+- outcome_date IS NULL means animal has not been released yet
 
 For unique animal counts, use COUNT(DISTINCT [animal_id]) to avoid duplicates.
 

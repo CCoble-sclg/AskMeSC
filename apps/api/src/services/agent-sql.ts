@@ -125,7 +125,7 @@ export class AgentSqlService {
 
   private getStaticTableList(): string {
     return `Tables in Animal database (key tables):
-[dbo].[kennel] - Animals in kennel/shelter (intake_date, outcome_date, intake_type, outcome_type, animal_id)
+[dbo].[kennel] - Animals in kennel/shelter (intake_date, outcome_date, intake_type, outcome_type, animal_id, location, kennel_stat)
 [dbo].[animal] - Animal records (species, breed, name, color, sex, etc.)
 [dbo].[person] - People records (owners, contacts)
 [dbo].[tag] - Pet license/tag records
@@ -136,9 +136,13 @@ export class AgentSqlService {
 
 Other tables: animal_history, kennel_history, person_history, memo, receipt, todo, event, schedule
 
-IMPORTANT: Use describe_table to get column details before querying.
-For animals currently in kennel, check kennel table where outcome_date IS NULL.
-Data is historical through early 2022.`;
+CRITICAL DOMAIN KNOWLEDGE FOR KENNEL TABLE:
+- For "animals currently in the kennel" or "how many animals": 
+  Use: WHERE outcome_date IS NULL AND location = 'SHELTER'
+- location='SHELTER' = physically at shelter (~40 animals)
+- location='WEB' = online/web entries (13,000+ - NOT physical animals)
+- kennel_stat values: 'STRAY WAIT', 'AVAILABLE', 'EVALUATION', 'UNAVAIL'
+- Data is historical through early 2022.`;
   }
 
   private async describeTable(tableName: string): Promise<string> {
