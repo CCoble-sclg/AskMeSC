@@ -124,45 +124,25 @@ export class AgentSqlService {
   }
 
   private getStaticTableList(): string {
-    return `Tables in Animal database (key tables):
-[dbo].[kennel] - Animals in kennel/shelter (intake_date, outcome_date, intake_type, outcome_type, animal_id, location, kennel_stat)
-[dbo].[animal] - Animal records (species, breed, name, color, sex, etc.)
-[dbo].[person] - People records (owners, contacts)
-[dbo].[tag] - Pet license/tag records
-[dbo].[bite] - Bite incident records
+    return `Tables in Animal database:
+
+[dbo].[kennel] - Kennel records (animals that have been in the shelter)
+[dbo].[animal] - Animal master records
+[dbo].[person] - People (owners, contacts)
+[dbo].[tag] - Pet licenses/tags
+[dbo].[bite] - Bite incidents
 [dbo].[violation] - Code violations
-[dbo].[treatment] - Medical treatment records
-[dbo].[animal_evaluation] - Animal behavior evaluations
+[dbo].[treatment] - Medical treatments
+[dbo].[animal_evaluation] - Behavior evaluations
 
 Other tables: animal_history, kennel_history, person_history, memo, receipt, todo, event, schedule
 
-***** CRITICAL - READ THIS FIRST *****
-For "animals currently in the kennel/shelter" or "how many animals":
-ALWAYS USE: WHERE outcome_date IS NULL AND location = 'SHELTER'
+IMPORTANT: Before running count queries, use describe_table and sample_values to understand:
+- What columns exist that might filter the data
+- What values those columns contain
+- Which values represent "current/active" vs "historical/inactive" records
 
-The location column is ESSENTIAL:
-- location = 'SHELTER' = PHYSICAL animals at shelter (approximately 40-50)
-- location = 'WEB' = Web entries, NOT real animals (13,000+ records - IGNORE THESE)
-
-Without location = 'SHELTER', you will get 13,000+ wrong results!
-*************************************
-
-OUTCOME TYPES (outcome_type column):
-- 'EUTH' = Euthanized
-- 'ADOPT' = Adopted
-- 'RTO' = Return to Owner
-- 'TRANSFER' = Transferred to another facility
-- 'DIED' = Died naturally
-
-For euthanasia queries: WHERE outcome_type = 'EUTH'
-For adoptions: WHERE outcome_type = 'ADOPT'
-
-INTAKE TYPES (intake_type column):
-- 'STRAY' = Stray animal
-- 'OWNED' = Owner surrender
-- 'RESCUE' = Rescue intake
-
-NOTE: Data includes current year 2026 data. Use appropriate date filters.`;
+This is an animal shelter database - explore it to understand the data structure.`;
   }
 
   private async describeTable(tableName: string): Promise<string> {
@@ -296,21 +276,28 @@ NOTE: Data includes current year 2026 data. Use appropriate date filters.`;
 AVAILABLE TOOLS:
 ${toolDescriptions}
 
-CRITICAL GUIDELINES:
-1. FIRST: Call list_tables - it contains CRITICAL DOMAIN KNOWLEDGE you MUST follow!
-   - The domain knowledge tells you EXACTLY how to query for common questions
-   - READ IT CAREFULLY before doing anything else
+CRITICAL GUIDELINES - EXPLORE LIKE A DATA ANALYST:
 
-2. For "animals in shelter/kennel" questions:
-   - You MUST use: WHERE outcome_date IS NULL AND location = 'SHELTER'
-   - Without location='SHELTER' you will get 13,000+ wrong results (web entries)
-   - Correct answer is approximately 40-50 animals
+1. UNDERSTAND THE TABLE STRUCTURE:
+   - describe_table to see all columns
+   - Look for columns that might filter data: status, type, location, category columns
 
-3. EXPLORE DATA VALUES:
-   - Use sample_values on status/type columns to find codes
-   - Don't guess values - explore first
+2. EXPLORE DATA DISTRIBUTIONS:
+   - Use sample_values on ANY column that looks like it could segment data
+   - For count questions, check if there are status/location/type columns that split the data
+   - Understand what different values mean before querying
 
-4. When you have enough information, use final_answer
+3. SANITY CHECK YOUR RESULTS:
+   - If a count seems surprisingly high or low, investigate WHY
+   - Sample more columns to understand what's included in your count
+   - A shelter asking "how many animals do we have" probably means physical animals, not all records
+
+4. THINK LIKE A HUMAN:
+   - What would a reasonable answer be?
+   - If you get 13,000+ for "animals in shelter", that's probably ALL records, not current animals
+   - Look for columns that distinguish current vs historical, physical vs virtual, active vs inactive
+
+5. When confident in your understanding, use final_answer
 
 USER QUESTION: ${question}
 

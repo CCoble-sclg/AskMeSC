@@ -115,32 +115,14 @@ DATE FUNCTIONS (T-SQL):
 - Group by day: CAST([Col] AS DATE)
 - Group by month: FORMAT([Col], 'yyyy-MM')
 
-ANIMAL DATABASE DOMAIN KNOWLEDGE:
-This database tracks animal shelter KENNEL operations. Tables use [dbo] schema.
+ANIMAL SHELTER DATABASE:
+Tables use [dbo] schema. Key tables: kennel, animal, person, tag, bite, violation, treatment.
 
-Key tables for kennel operations:
-- [dbo].[kennel] - Animals currently or previously in the kennel
-- [dbo].[animal] - Animal records (dogs, cats, etc.)
-- [dbo].[person] - Pet owner/contact information
-- [dbo].[tag] - Pet license/tag records
+The kennel table has a 'location' column - use sample queries to understand what values exist before counting.
+The kennel table has 'outcome_date' - NULL means no outcome yet.
+The kennel table has 'outcome_type' for outcomes like euthanasia, adoption, etc.
 
-CRITICAL: For questions about "animals in the kennel" or "how many animals currently":
-- Query: SELECT COUNT(*) FROM [dbo].[kennel] WHERE outcome_date IS NULL AND location = 'SHELTER'
-- location='SHELTER' means physically at the shelter (~40 animals)
-- location='WEB' means web/online entries (NOT physical animals - ignore these)
-- outcome_date IS NULL means animal has not been released yet
-
-OUTCOME TYPES (outcome_type column):
-- 'EUTH' = Euthanized - for euthanasia queries use: WHERE outcome_type = 'EUTH'
-- 'ADOPT' = Adopted
-- 'RTO' = Return to Owner
-- 'TRANSFER' = Transferred
-- 'DIED' = Died naturally
-
-INTAKE TYPES (intake_type column): 'STRAY', 'OWNED', 'RESCUE'
-
-For unique animal counts, use COUNT(DISTINCT [animal_id]) to avoid duplicates.
-NOTE: Database has current 2026 data. Use date filters like outcome_date >= '2026-01-01'.
+When counting "current" animals, consider what columns might distinguish current vs historical records.
 
 ${schemaContext}
 
