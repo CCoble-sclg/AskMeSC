@@ -227,10 +227,74 @@ chatRoutes.post('/', async (c) => {
     return c.json(result);
   } catch (error) {
     if (error instanceof RateLimitError) {
-      console.warn('Rate limit hit:', error.message);
-      return c.json({ 
-        error: 'I\'m processing too many requests right now. Please wait about 30 seconds and try again.' 
-      }, 429);
+      console.warn('Rate limit hit, trying Workers AI fallback...');
+      
+      // Try Workers AI as fallback for SQL generation and execution
+      try {
+        const lowerMessage = message.toLowerCase();
+        let sql = '';
+        let queryResult: { rows: any[]; rowCount: number } | null = null;
+        
+        // Try to detect common kennel queries and run them directly
+        if ((lowerMessage.includes('animal') || lowerMessage.includes('kennel')) && 
+            (lowerMessage.includes('how many') || lowerMessage.includes('count'))) {
+          
+          if (lowerMessage.includes('current') || !lowerMessage.includes('total')) {
+            sql = 'SELECT COUNT(*) as count FROM kennel WHERE outcome_date IS NULL';
+          } else {
+            sql = 'SELECT COUNT(*) as count FROM kennel';
+          }
+          
+          // Execute the query
+          const response = await fetch(`${c.env.AZURE_FUNCTION_URL}/api/query`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': c.env.AZURE_FUNCTION_KEY,
+            },
+            body: JSON.stringify({ database: 'Animal', query: sql }),
+          });
+          
+          if (response.ok) {
+            queryResult = await response.json();
+          }
+        }
+        
+        // Use Workers AI to format the response
+        const contextInfo = queryResult 
+          ? `Query executed: ${sql}\nResult: ${JSON.stringify(queryResult.rows)}`
+          : 'No query was executed.';
+        
+        const aiResponse = await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+          messages: [
+            {
+              role: 'system',
+              content: `You are a helpful assistant for an animal shelter. Answer the user's question based on the data provided. Be concise.
+              
+${contextInfo}`
+            },
+            { role: 'user', content: message }
+          ],
+          max_tokens: 256,
+        });
+        
+        const fallbackResponse = typeof aiResponse === 'object' && 'response' in aiResponse 
+          ? String(aiResponse.response) 
+          : queryResult 
+            ? `Based on the database query, the count is: ${queryResult.rows[0]?.count || 0}`
+            : 'I apologize, but I could not process your request at this time.';
+        
+        return c.json({
+          response: fallbackResponse + '\n\n*(Using simplified AI due to high demand)*',
+          sources: sql ? [{ table: 'kennel', id: 'fallback', snippet: sql, score: 0.8 }] : [],
+          conversationId,
+        });
+      } catch (fallbackError) {
+        console.error('Workers AI fallback also failed:', fallbackError);
+        return c.json({ 
+          error: 'I\'m processing too many requests right now. Please wait about 30 seconds and try again.' 
+        }, 429);
+      }
     }
     console.error('Chat error:', error);
     const errorMessage = error instanceof Error ? error.message : String(error);
