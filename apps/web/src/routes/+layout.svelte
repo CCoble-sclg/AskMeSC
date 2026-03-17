@@ -52,8 +52,11 @@
   }
 
   .county-logo {
-    height: 60px;
+    height: 55px;
     width: auto;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 6px 10px;
+    border-radius: 6px;
   }
 
   .title-group {
