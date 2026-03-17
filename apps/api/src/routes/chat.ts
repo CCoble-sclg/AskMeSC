@@ -240,7 +240,8 @@ chatRoutes.post('/', async (c) => {
             (lowerMessage.includes('how many') || lowerMessage.includes('count'))) {
           
           if (lowerMessage.includes('current') || !lowerMessage.includes('total')) {
-            sql = 'SELECT COUNT(*) as count FROM kennel WHERE outcome_date IS NULL';
+            // Animals currently in kennel = no outcome + physically at shelter
+            sql = "SELECT COUNT(*) as count FROM kennel WHERE outcome_date IS NULL AND location = 'SHELTER'";
           } else {
             sql = 'SELECT COUNT(*) as count FROM kennel';
           }
