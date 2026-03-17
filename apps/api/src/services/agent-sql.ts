@@ -124,13 +124,20 @@ export class AgentSqlService {
   }
 
   private getStaticTableList(): string {
-    return `Tables in database (known tables):
-[dbo].[kennel] - Kennel/cage assignments for animals
-[dbo].[animal] - Animal records (dogs, cats, etc.)
-[dbo].[owner] - Pet owner information
-[dbo].[license] - Pet license records
+    return `Tables in Animal database (key tables):
+[dbo].[kennel] - Animals in kennel/shelter (date_in, date_out, cage info)
+[dbo].[animal] - Animal records (species, breed, name, etc.)
+[dbo].[person] - People records (owners, contacts)
+[dbo].[tag] - Pet license/tag records
+[dbo].[bite] - Bite incident records
+[dbo].[violation] - Code violations
+[dbo].[treatment] - Medical treatment records
+[dbo].[animal_evaluation] - Animal behavior evaluations
 
-Use describe_table to get column details for any table.`;
+Other tables: animal_history, kennel_history, person_history, memo, receipt, todo, event, schedule
+
+IMPORTANT: Use describe_table to get column details before querying.
+For animals currently in kennel, check kennel table where date_out IS NULL.`;
   }
 
   private async describeTable(tableName: string): Promise<string> {
