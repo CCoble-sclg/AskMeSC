@@ -318,7 +318,14 @@ If you have enough information, use the final_answer tool.`;
     let finalSql = '';
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
-      const prompt = this.buildAgentPrompt(question, steps);
+      // Add delay between iterations to avoid rate limiting
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+      // Only keep last 5 steps to reduce prompt size
+      const recentSteps = steps.slice(-5);
+      const prompt = this.buildAgentPrompt(question, recentSteps);
       
       const response = await this.claude.chat(
         'You are a database exploration agent. Always respond with valid JSON.',
