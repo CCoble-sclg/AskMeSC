@@ -275,12 +275,32 @@ SQL query:`;
       return '';
     }
 
-    const columns = Object.keys(result.rows[0]);
+    let columns = Object.keys(result.rows[0]);
     if (columns.length === 0) return '';
 
-    const formatValue = (val: unknown): string => {
+    // Filter out redundant columns (if year_month exists, remove year and month)
+    const hasYearMonth = columns.some(c => c.toLowerCase().includes('year_month'));
+    if (hasYearMonth) {
+      columns = columns.filter(c => {
+        const lower = c.toLowerCase();
+        // Keep year_month, remove separate year/month columns
+        if ((lower === 'year' || lower === 'intake_year' || lower === 'outcome_year') && 
+            !lower.includes('year_month')) return false;
+        if ((lower === 'month' || lower === 'intake_month' || lower === 'outcome_month') && 
+            !lower.includes('year_month')) return false;
+        return true;
+      });
+    }
+
+    const formatValue = (val: unknown, colName: string): string => {
       if (val === null || val === undefined) return '-';
       if (typeof val === 'number') {
+        // Don't add commas to year values (4-digit numbers in year columns or 1900-2100 range)
+        const isYearColumn = colName.toLowerCase().includes('year');
+        const looksLikeYear = Number.isInteger(val) && val >= 1900 && val <= 2100;
+        if (isYearColumn || looksLikeYear) {
+          return String(val);
+        }
         if (Number.isInteger(val)) return val.toLocaleString();
         return val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       }
@@ -290,14 +310,19 @@ SQL query:`;
     };
 
     const formatHeader = (col: string): string => {
-      return col.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim();
+      // Better header formatting
+      return col
+        .replace(/_/g, ' ')
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/^./, s => s.toUpperCase())
+        .trim();
     };
 
     const header = '| ' + columns.map(formatHeader).join(' | ') + ' |';
     const separator = '| ' + columns.map(() => '---').join(' | ') + ' |';
-    
+
     const rows = result.rows.slice(0, maxRows).map(row => {
-      return '| ' + columns.map(col => formatValue(row[col])).join(' | ') + ' |';
+      return '| ' + columns.map(col => formatValue(row[col], col)).join(' | ') + ' |';
     });
 
     let table = [header, separator, ...rows].join('\n');
