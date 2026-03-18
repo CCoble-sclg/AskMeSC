@@ -1,7 +1,7 @@
 import type { Env, QueryResult } from '../types';
 import { ClaudeService } from './claude';
 
-const MAX_ITERATIONS = 10;
+const MAX_ITERATIONS = 12;
 const MAX_ROWS = 50;
 
 interface AgentTool {
@@ -368,10 +368,23 @@ If you have enough information, use the final_answer tool.`;
       console.log(`Agent step ${i + 1}: ${action.tool} -> ${result.substring(0, 100)}...`);
     }
 
-    // If we hit max iterations without final_answer, generate one
+    // If we hit max iterations without final_answer, try to summarize what we found
     if (!finalAnswer) {
-      finalAnswer = 'I explored the database but could not determine a complete answer. Here is what I found:\n\n' +
-        steps.map(s => s.result).filter(Boolean).join('\n\n');
+      // Look for query results that might contain the answer
+      const queryResults = steps
+        .filter(s => s.tool === 'run_query' && s.result && !s.result.includes('error'))
+        .map(s => s.result)
+        .join('\n');
+      
+      // If we have useful results, summarize them
+      if (queryResults.includes('cnt:') || queryResults.includes('count')) {
+        finalAnswer = 'Based on my database exploration, here is what I found:\n\n' +
+          queryResults + '\n\n' +
+          'Note: I reached my exploration limit before formulating a complete answer, but the data above should help answer your question.';
+      } else {
+        finalAnswer = 'I explored the database but could not determine a complete answer. Here is what I found:\n\n' +
+          steps.map(s => s.result).filter(Boolean).join('\n\n');
+      }
     }
 
     return { answer: finalAnswer, steps, finalSql };
