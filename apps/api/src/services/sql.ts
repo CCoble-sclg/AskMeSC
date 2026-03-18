@@ -91,30 +91,30 @@ export class SqlService {
       
       followUpBlock = `
 PREVIOUS USER QUESTION: ${previousQuestion || '(unknown)'}
-PREVIOUS SQL QUERY (you MUST use this as your starting point):
+PREVIOUS SQL QUERY:
 ${previousSql}
 ${responseContext}
-FOLLOW-UP INSTRUCTIONS (CRITICAL — read carefully):
-The user is asking a follow-up question about the results of the SQL above.
+=== FOLLOW-UP INSTRUCTIONS (CRITICAL) ===
 
-INTERPRETING SHORT RESPONSES:
-- If the user says "yes", "sure", "ok", "please", etc., look at the CHATBOT'S PREVIOUS RESPONSE above
-- The chatbot likely offered follow-up options (e.g., "Would you like me to look at euthanasia numbers, year-over-year trends, or monthly breakdown?")
-- Pick the FIRST option mentioned and generate that query
-- Example: If chatbot offered "euthanasia numbers, year-over-year trends, or monthly breakdown" and user said "yes", generate a query for euthanasia numbers
+The user's current message is: "${question}"
 
-You MUST take the previous SQL query and MODIFY it. Do NOT write a new query from scratch.
-- KEEP the same FROM / JOIN tables
-- KEEP ALL WHERE clauses exactly as they are (especially date filters, status filters, etc.)
-- Only ADD or CHANGE the SELECT columns, GROUP BY, ORDER BY, or add extra WHERE filters as needed
-- If the previous query had date filters like DATEADD(...), those MUST appear in your output
+STEP 1: DETERMINE WHAT THE USER WANTS
+- If user says "yes", "sure", "ok", "please", "do it", etc. → Look at CHATBOT'S PREVIOUS RESPONSE above
+- Find the FIRST option/suggestion the chatbot offered (usually after "Would you like me to...")
+- Generate a query for THAT option
 
-COMMON FOLLOW-UP PATTERNS:
-- "break down by dogs/cats" → JOIN [dbo].[animal] a ON k.[animal_id] = a.[animal_id], then SELECT a.[animal_type], COUNT(*) ... GROUP BY a.[animal_type]
-- "break down by month" → SELECT FORMAT([date_col], 'yyyy-MM') as month, COUNT(*) ... GROUP BY FORMAT([date_col], 'yyyy-MM')
-- "show me the details" → Change COUNT(*) to SELECT individual columns
-- "euthanasia numbers/rates" → Change outcome_type filter to 'EUTH' and COUNT
-- "year-over-year trends" → GROUP BY YEAR([date_col]) ORDER BY year
+STEP 2: MODIFY THE QUERY APPROPRIATELY
+Based on what the user wants, you MUST change the query. DO NOT return the same query!
+
+COMMON MODIFICATIONS:
+- "dogs in hold/pending status" → CHANGE kennel_stat filter: WHERE k.[kennel_stat] IN ('STRAY WAIT', 'EVALUATION', 'UNAVAIL', 'HOLD')
+- "all animal types" or "cats too" → REMOVE the animal_type filter, or change to include CAT
+- "break down by type" → Add GROUP BY a.[animal_type]
+- "euthanasia numbers" → Change to WHERE k.[outcome_type] = 'EUTH' and COUNT(*)
+- "trends over time" → Add GROUP BY with date formatting
+
+IMPORTANT: The query MUST be DIFFERENT from the previous query!
+If the user said "yes" to see something different, returning the same query is WRONG.
 
 ALWAYS output a valid SELECT query starting with "SELECT".
 
