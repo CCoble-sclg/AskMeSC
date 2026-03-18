@@ -94,6 +94,7 @@ chatRoutes.post('/', async (c) => {
   const conversationId = body.conversationId || crypto.randomUUID();
   const previousSql = body.previousSql;
   const previousQuestion = body.previousQuestion;
+  const previousResponse = body.previousResponse;
   
   try {
     const { type: queryType, confidence } = determineQueryType(message, !!previousSql);
@@ -153,7 +154,8 @@ chatRoutes.post('/', async (c) => {
             message,
             body.filters?.database,
             previousSql,
-            previousQuestion
+            previousQuestion,
+            previousResponse
           );
           result = queryResult.result;
           generatedSql = queryResult.generatedSql;

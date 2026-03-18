@@ -9,6 +9,7 @@
   let conversationId = $state<string | undefined>(undefined);
   let lastSql = $state<string | undefined>(undefined);
   let lastQuestion = $state<string | undefined>(undefined);
+  let lastResponse = $state<string | undefined>(undefined);
   let chatContainer: HTMLElement;
 
   const scrollToBottom = () => {
@@ -36,10 +37,11 @@
     isLoading = true;
 
     try {
-      const response = await chatApi.sendMessage(text, conversationId, lastSql, lastQuestion);
+      const response = await chatApi.sendMessage(text, conversationId, lastSql, lastQuestion, lastResponse);
       conversationId = response.conversationId;
       lastSql = response.lastSql;
       lastQuestion = response.lastQuestion;
+      lastResponse = response.response;  // Store the response for context on follow-ups
 
       // Add assistant message
       const assistantMessage: Message = {

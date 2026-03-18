@@ -73,7 +73,8 @@ export class SqlService {
     question: string,
     database?: string,
     previousSql?: string,
-    previousQuestion?: string
+    previousQuestion?: string,
+    previousResponse?: string
   ): Promise<string> {
     const allKeywords = previousQuestion
       ? [...this.extractKeywords(question), ...this.extractKeywords(previousQuestion)]
@@ -83,13 +84,25 @@ export class SqlService {
     
     let followUpBlock = '';
     if (previousSql) {
+      // Include the chatbot's previous response so LLM knows what options were offered
+      const responseContext = previousResponse 
+        ? `\nCHATBOT'S PREVIOUS RESPONSE (what the user is responding to):\n${previousResponse.substring(0, 1500)}\n`
+        : '';
+      
       followUpBlock = `
 PREVIOUS USER QUESTION: ${previousQuestion || '(unknown)'}
 PREVIOUS SQL QUERY (you MUST use this as your starting point):
 ${previousSql}
-
+${responseContext}
 FOLLOW-UP INSTRUCTIONS (CRITICAL — read carefully):
 The user is asking a follow-up question about the results of the SQL above.
+
+INTERPRETING SHORT RESPONSES:
+- If the user says "yes", "sure", "ok", "please", etc., look at the CHATBOT'S PREVIOUS RESPONSE above
+- The chatbot likely offered follow-up options (e.g., "Would you like me to look at euthanasia numbers, year-over-year trends, or monthly breakdown?")
+- Pick the FIRST option mentioned and generate that query
+- Example: If chatbot offered "euthanasia numbers, year-over-year trends, or monthly breakdown" and user said "yes", generate a query for euthanasia numbers
+
 You MUST take the previous SQL query and MODIFY it. Do NOT write a new query from scratch.
 - KEEP the same FROM / JOIN tables
 - KEEP ALL WHERE clauses exactly as they are (especially date filters, status filters, etc.)
@@ -100,6 +113,8 @@ COMMON FOLLOW-UP PATTERNS:
 - "break down by dogs/cats" → JOIN [dbo].[animal] a ON k.[animal_id] = a.[animal_id], then SELECT a.[animal_type], COUNT(*) ... GROUP BY a.[animal_type]
 - "break down by month" → SELECT FORMAT([date_col], 'yyyy-MM') as month, COUNT(*) ... GROUP BY FORMAT([date_col], 'yyyy-MM')
 - "show me the details" → Change COUNT(*) to SELECT individual columns
+- "euthanasia numbers/rates" → Change outcome_type filter to 'EUTH' and COUNT
+- "year-over-year trends" → GROUP BY YEAR([date_col]) ORDER BY year
 
 ALWAYS output a valid SELECT query starting with "SELECT".
 
@@ -243,9 +258,10 @@ SQL query:`;
     question: string, 
     database?: string,
     previousSql?: string,
-    previousQuestion?: string
+    previousQuestion?: string,
+    previousResponse?: string
   ): Promise<{ result: QueryResult; generatedSql: string }> {
-    const sqlQuery = await this.generateSql(question, database, previousSql, previousQuestion);
+    const sqlQuery = await this.generateSql(question, database, previousSql, previousQuestion, previousResponse);
     
     if (sqlQuery.includes("Cannot generate query")) {
       throw new Error('Unable to generate a valid query for this question');
