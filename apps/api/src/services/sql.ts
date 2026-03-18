@@ -94,8 +94,14 @@ You MUST take the previous SQL query and MODIFY it. Do NOT write a new query fro
 - KEEP the same FROM / JOIN tables
 - KEEP ALL WHERE clauses exactly as they are (especially date filters, status filters, etc.)
 - Only ADD or CHANGE the SELECT columns, GROUP BY, ORDER BY, or add extra WHERE filters as needed
-- Example: if previous query was "SELECT COUNT(*) FROM [t] WHERE [date] > X" and user says "break it down by type", output: "SELECT [type], COUNT(*) FROM [t] WHERE [date] > X GROUP BY [type]"
 - If the previous query had date filters like DATEADD(...), those MUST appear in your output
+
+COMMON FOLLOW-UP PATTERNS:
+- "break down by dogs/cats" → JOIN [dbo].[animal] a ON k.[animal_id] = a.[animal_id], then SELECT a.[animal_type], COUNT(*) ... GROUP BY a.[animal_type]
+- "break down by month" → SELECT FORMAT([date_col], 'yyyy-MM') as month, COUNT(*) ... GROUP BY FORMAT([date_col], 'yyyy-MM')
+- "show me the details" → Change COUNT(*) to SELECT individual columns
+
+ALWAYS output a valid SELECT query starting with "SELECT".
 
 `;
     }
