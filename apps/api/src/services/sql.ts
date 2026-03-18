@@ -100,8 +100,14 @@ You MUST take the previous SQL query and MODIFY it. Do NOT write a new query fro
 `;
     }
 
+    const today = new Date().toISOString().split('T')[0];
+    const currentYear = new Date().getFullYear();
+    
     const prompt = `You are a SQL expert. Generate a Microsoft SQL Server (T-SQL) query.
 ${followUpBlock}
+CURRENT DATE: ${today} (Year: ${currentYear})
+When users ask about "this year", "since January 1st", "YTD", etc., use year ${currentYear}.
+
 RULES:
 - Generate ONLY a SELECT query
 - Use TOP ${MAX_ROWS} after SELECT

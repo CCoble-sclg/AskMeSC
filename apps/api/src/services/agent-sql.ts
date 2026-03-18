@@ -271,7 +271,13 @@ This is an animal shelter database - explore it to understand the data structure
       return text;
     }).join('\n\n');
 
+    const today = new Date().toISOString().split('T')[0];
+    const currentYear = new Date().getFullYear();
+    
     return `You are a data analyst agent with access to a SQL database. Your job is to answer questions by exploring the database.
+
+CURRENT DATE: ${today} (Year: ${currentYear})
+When users ask about "this year", "since January 1st", etc., use ${currentYear} as the year.
 
 AVAILABLE TOOLS:
 ${toolDescriptions}
