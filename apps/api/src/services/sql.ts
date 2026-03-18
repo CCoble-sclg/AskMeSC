@@ -124,11 +124,16 @@ DATE FUNCTIONS (T-SQL):
 ANIMAL SHELTER DATABASE:
 Tables use [dbo] schema. Key tables: kennel, animal, person, tag, bite, violation, treatment.
 
-The kennel table has a 'location' column - use sample queries to understand what values exist before counting.
-The kennel table has 'outcome_date' - NULL means no outcome yet.
-The kennel table has 'outcome_type' for outcomes like euthanasia, adoption, etc.
+KNOWN CODES (use these exact values in queries):
+- outcome_type: 'EUTH' (euthanasia), 'ADOPTION', 'RTO' (return to owner), 'TRANSFER', 'DIED'
+- intake_type: 'STRAY', 'OWNED' (owner surrender), 'RESCUE'
+- location: 'SHELTER' (physical animals), 'WEB' (web entries - exclude for physical counts)
+- kennel_stat: 'STRAY WAIT', 'AVAILABLE', 'EVALUATION', 'UNAVAIL'
 
-When counting "current" animals, consider what columns might distinguish current vs historical records.
+KEY FILTERS:
+- Current animals in shelter: WHERE outcome_date IS NULL AND location = 'SHELTER'
+- Euthanasia: WHERE outcome_type = 'EUTH'
+- Adoptions: WHERE outcome_type = 'ADOPTION'
 
 ${schemaContext}
 

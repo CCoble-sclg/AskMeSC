@@ -137,12 +137,17 @@ export class AgentSqlService {
 
 Other tables: animal_history, kennel_history, person_history, memo, receipt, todo, event, schedule
 
-IMPORTANT: Before running count queries, use describe_table and sample_values to understand:
-- What columns exist that might filter the data
-- What values those columns contain
-- Which values represent "current/active" vs "historical/inactive" records
+KNOWN CODES (verified from this database):
+- outcome_type: 'EUTH' (euthanasia), 'ADOPTION', 'RTO' (return to owner), 'TRANSFER', 'DIED'
+- intake_type: 'STRAY', 'OWNED' (owner surrender), 'RESCUE'
+- location: 'SHELTER' (physical animals ~40-50), 'WEB' (web entries - exclude for physical counts)
 
-This is an animal shelter database - explore it to understand the data structure.`;
+KEY QUERY PATTERNS:
+- Current animals: WHERE outcome_date IS NULL AND location = 'SHELTER'
+- Euthanasia counts: WHERE outcome_type = 'EUTH'
+- Adoptions: WHERE outcome_type = 'ADOPTION'
+
+Still explore with describe_table and sample_values to discover additional patterns.`;
   }
 
   private async describeTable(tableName: string): Promise<string> {
