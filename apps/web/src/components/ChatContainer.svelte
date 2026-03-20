@@ -10,6 +10,7 @@
   let lastSql = $state<string | undefined>(undefined);
   let lastQuestion = $state<string | undefined>(undefined);
   let lastResponse = $state<string | undefined>(undefined);
+  let lastDatabase = $state<string | undefined>(undefined);
   let chatContainer: HTMLElement;
 
   const scrollToBottom = () => {
@@ -37,11 +38,12 @@
     isLoading = true;
 
     try {
-      const response = await chatApi.sendMessage(text, conversationId, lastSql, lastQuestion, lastResponse);
+      const response = await chatApi.sendMessage(text, conversationId, lastSql, lastQuestion, lastResponse, lastDatabase);
       conversationId = response.conversationId;
       lastSql = response.lastSql;
       lastQuestion = response.lastQuestion;
       lastResponse = response.response;  // Store the response for context on follow-ups
+      lastDatabase = response.lastDatabase;  // Track which database was used
 
       // Add assistant message
       const assistantMessage: Message = {
@@ -73,6 +75,8 @@
     conversationId = undefined;
     lastSql = undefined;
     lastQuestion = undefined;
+    lastResponse = undefined;
+    lastDatabase = undefined;
   };
 </script>
 
@@ -84,11 +88,11 @@
         <p>I can help you find information about Stanly County:</p>
         <ul>
           <li>Animal shelter and kennel records</li>
-          <li>Pet licenses and registrations</li>
-          <li>Public records and documents</li>
-          <li>County services and departments</li>
+          <li>Employee and HR information</li>
+          <li>Finance and vendor payments</li>
+          <li>Utility billing and customer accounts</li>
         </ul>
-        <p class="hint">Try asking: "How many animals are currently in the kennel?"</p>
+        <p class="hint">Try asking: "How many animals are currently in the kennel?" or "Show me the top vendors by payment amount"</p>
       </div>
     {:else}
       {#each messages as message (message.id)}

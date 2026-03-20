@@ -64,6 +64,7 @@ const AGENT_TOOLS: AgentTool[] = [
 export class AgentSqlService {
   private env: Env;
   private claude: ClaudeService;
+  private currentDatabase: string = 'Animal';
 
   constructor(env: Env) {
     this.env = env;
@@ -84,14 +85,14 @@ export class AgentSqlService {
 
   private async listTables(): Promise<string> {
     try {
-      console.log('Agent: Fetching tables from schema endpoint...');
+      console.log(`Agent: Fetching tables from schema endpoint for ${this.currentDatabase}...`);
       
       // Use AbortController for timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
       
       const response = await fetch(
-        `${this.env.AZURE_FUNCTION_URL}/api/schema?database=Animal`,
+        `${this.env.AZURE_FUNCTION_URL}/api/schema?database=${this.currentDatabase}`,
         { 
           headers: { 'x-api-key': this.env.AZURE_FUNCTION_KEY },
           signal: controller.signal
@@ -116,7 +117,7 @@ export class AgentSqlService {
         `[${t.schema}].[${t.name}] - ${t.columns?.length || 0} columns`
       ).join('\n');
       
-      return `Tables in database:\n${tableList}`;
+      return `Tables in ${this.currentDatabase} database:\n${tableList}`;
     } catch (e) {
       console.error('Agent: Error in listTables, using static fallback:', e);
       return this.getStaticTableList();
@@ -124,6 +125,35 @@ export class AgentSqlService {
   }
 
   private getStaticTableList(): string {
+    if (this.currentDatabase === 'Logos') {
+      return this.getLogosStaticTableList();
+    }
+    return this.getAnimalStaticTableList();
+  }
+
+  private getLogosStaticTableList(): string {
+    return `Tables in Logos ERP database:
+
+This is a new database - use describe_table and sample_values to discover the schema.
+
+TYPICAL ERP TABLES (explore to confirm):
+- Employee/Personnel tables (HR data)
+- Vendor/Supplier tables
+- Invoice/Payment tables (Accounts Payable)
+- Customer/Account tables (Utility Billing)
+- Budget/GL Account tables (Finance)
+- Purchase Order tables
+
+EXPLORATION STRATEGY:
+1. Use list_tables to see all available tables
+2. Use describe_table on tables that look relevant to the question
+3. Use sample_values to understand what data is in key columns
+4. Build your query based on what you discover
+
+Start by exploring with describe_table on tables that seem relevant to the user's question.`;
+  }
+
+  private getAnimalStaticTableList(): string {
     return `Tables in Animal database:
 
 [dbo].[kennel] - Kennel records (animals that have been in the shelter)
@@ -158,12 +188,12 @@ Still explore with describe_table and sample_values to discover additional patte
       // Use SELECT TOP 0 to get column names without data - fast and reliable
       const sql = `SELECT TOP 0 * FROM [${name}]`;
       
-      const result = await this.callAzureFunction('query', { database: 'Animal', query: sql });
+      const result = await this.callAzureFunction('query', { database: this.currentDatabase, query: sql });
       
       if (result.error) {
         // Try fallback: get one row and infer columns
         const fallbackSql = `SELECT TOP 1 * FROM [${name}]`;
-        const fallbackResult = await this.callAzureFunction('query', { database: 'Animal', query: fallbackSql });
+        const fallbackResult = await this.callAzureFunction('query', { database: this.currentDatabase, query: fallbackSql });
         
         if (fallbackResult.error || !fallbackResult.rows?.length) {
           return `Table [${name}] not found or query error: ${result.error || fallbackResult.error}`;
@@ -176,7 +206,7 @@ Still explore with describe_table and sample_values to discover additional patte
       // For TOP 0, columns are in the metadata - but we need to get them differently
       // Let's just get 1 row and extract column names
       const sampleSql = `SELECT TOP 1 * FROM [${name}]`;
-      const sampleResult = await this.callAzureFunction('query', { database: 'Animal', query: sampleSql });
+      const sampleResult = await this.callAzureFunction('query', { database: this.currentDatabase, query: sampleSql });
       
       if (!sampleResult.rows?.length) {
         return `Table [dbo].[${name}] exists but appears empty`;
@@ -197,7 +227,7 @@ Still explore with describe_table and sample_values to discover additional patte
       
       const sql = `SELECT TOP ${limit} DISTINCT [${columnName}] as val FROM [${schema}].[${name}] WHERE [${columnName}] IS NOT NULL ORDER BY [${columnName}]`;
       
-      const result = await this.callAzureFunction('query', { database: 'Animal', query: sql });
+      const result = await this.callAzureFunction('query', { database: this.currentDatabase, query: sql });
       
       if (result.error) return `Error: ${result.error}`;
       if (!result.rows?.length) return `No values found in ${tableName}.${columnName}`;
@@ -221,7 +251,7 @@ Still explore with describe_table and sample_values to discover additional patte
         sql = sql.replace(/^SELECT\s+/i, `SELECT TOP ${MAX_ROWS} `);
       }
       
-      const result = await this.callAzureFunction('query', { database: 'Animal', query: sql });
+      const result = await this.callAzureFunction('query', { database: this.currentDatabase, query: sql });
       
       if (result.error) return `Query error: ${result.error}`;
       
@@ -279,10 +309,20 @@ Still explore with describe_table and sample_values to discover additional patte
     const today = new Date().toISOString().split('T')[0];
     const currentYear = new Date().getFullYear();
     
+    // Database-specific context
+    const databaseContext = this.currentDatabase === 'Logos' 
+      ? `DATABASE: Logos (ERP System - contains HR, Finance, and Utility Billing data)
+This is a business/financial database. Explore tables to discover the schema.`
+      : `DATABASE: Animal (Animal Shelter/Control data)
+Key tables: kennel, animal, person, tag, bite, violation, treatment
+Known codes: outcome_type (EUTH, ADOPTION, RTO, TRANSFER, DIED), location (SHELTER, WEB)`;
+    
     return `You are a data analyst agent with access to a SQL database. Your job is to answer questions by exploring the database.
 
 CURRENT DATE: ${today} (Year: ${currentYear})
 When users ask about "this year", "since January 1st", etc., use ${currentYear} as the year.
+
+${databaseContext}
 
 AVAILABLE TOOLS:
 ${toolDescriptions}
@@ -290,28 +330,23 @@ ${toolDescriptions}
 CRITICAL GUIDELINES - EXPLORE LIKE A DATA ANALYST:
 
 1. UNDERSTAND THE TABLE STRUCTURE:
-   - describe_table to see all columns
+   - Use list_tables to see what's available
+   - Use describe_table to see all columns in a table
    - Look for columns that might filter data: status, type, location, category columns
 
 2. FOR COUNT QUESTIONS - ALWAYS CHECK THESE COLUMN TYPES:
    - 'location' columns - might distinguish physical vs virtual/web records
    - 'status' or 'stat' columns - might indicate active vs inactive
    - 'type' columns - might categorize records
-   - Date columns (like outcome_date) - NULL might mean current/active
+   - Date columns - NULL might mean current/active
    
    RUN GROUP BY queries on these columns to see the distribution BEFORE giving a final count!
 
 3. SANITY CHECK YOUR RESULTS:
-   - If a count is very large (thousands), investigate what's included
-   - Group by location/status columns to see the breakdown
-   - A shelter asking "how many animals" probably means PHYSICAL animals at the shelter
+   - If a count is unexpectedly large or small, investigate what's included
+   - Group by relevant columns to see the breakdown
 
-4. THINK LIKE A HUMAN:
-   - A reasonable shelter count is typically 20-100 animals, not thousands
-   - If you get 13,000+, there's likely a filter you're missing (location, status, etc.)
-   - Always verify by grouping by location or status columns
-
-5. When confident in your understanding, use final_answer with a specific number
+4. When confident in your understanding, use final_answer with a clear response
 
 USER QUESTION: ${question}
 
@@ -326,7 +361,10 @@ Now decide your next action. Respond in this exact JSON format:
 If you have enough information, use the final_answer tool.`;
   }
 
-  async queryWithAgent(question: string): Promise<{ answer: string; steps: AgentStep[]; finalSql?: string }> {
+  async queryWithAgent(question: string, database: string = 'Animal'): Promise<{ answer: string; steps: AgentStep[]; finalSql?: string }> {
+    this.currentDatabase = database;
+    console.log(`Agent starting exploration of ${database} database for question: ${question.substring(0, 50)}...`);
+    
     const steps: AgentStep[] = [];
     let finalAnswer = '';
     let finalSql = '';

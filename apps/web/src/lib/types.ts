@@ -34,4 +34,5 @@ export interface ChatResponse {
   conversationId: string;
   lastSql?: string;
   lastQuestion?: string;
+  lastDatabase?: string;
 }

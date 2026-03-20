@@ -25,6 +25,71 @@ const SQL_KEYWORDS = [
   'database', 'db', 'table', 'tables', 'data'
 ];
 
+// Keywords that indicate Logos ERP database (HR, Finance, Utility Billing)
+const LOGOS_KEYWORDS = [
+  // HR
+  'employee', 'employees', 'staff', 'payroll', 'salary', 'salaries', 'wage', 'wages',
+  'hire', 'hired', 'hiring', 'termination', 'terminated', 'department', 'departments',
+  'position', 'positions', 'job', 'jobs', 'benefits', 'leave', 'vacation', 'sick',
+  'overtime', 'hours worked', 'timesheet', 'hr', 'human resources',
+  // Finance
+  'invoice', 'invoices', 'payment', 'payments', 'vendor', 'vendors', 'purchase',
+  'purchases', 'purchase order', 'po', 'budget', 'budgets', 'expense', 'expenses',
+  'revenue', 'fund', 'funds', 'account', 'accounts', 'gl', 'general ledger',
+  'accounts payable', 'accounts receivable', 'ap', 'ar', 'check', 'checks',
+  'fiscal', 'appropriation', 'encumbrance', 'expenditure', 'expenditures',
+  // Utility Billing
+  'utility', 'utilities', 'water', 'sewer', 'garbage', 'trash', 'bill', 'bills',
+  'billing', 'meter', 'meters', 'reading', 'readings', 'usage', 'consumption',
+  'customer', 'customers', 'service address', 'account balance', 'delinquent',
+  'disconnect', 'reconnect', 'deposit', 'rate', 'rates'
+];
+
+// Keywords that indicate Animal database
+const ANIMAL_KEYWORDS = [
+  'animal', 'animals', 'dog', 'dogs', 'cat', 'cats', 'pet', 'pets',
+  'kennel', 'shelter', 'adoption', 'adoptions', 'adopted', 'stray', 'strays',
+  'euthanasia', 'euthanized', 'intake', 'intakes', 'outcome', 'outcomes',
+  'breed', 'breeds', 'spay', 'neuter', 'vaccination', 'rabies',
+  'bite', 'bites', 'violation', 'violations', 'animal control',
+  'license', 'licenses', 'tag', 'tags', 'microchip'
+];
+
+// Determine which database to query based on the question
+function determineDatabase(question: string, previousDatabase?: string): string {
+  const lowerQuestion = question.toLowerCase();
+  
+  // If we have context from a previous query, stay on that database for follow-ups
+  if (previousDatabase && (
+    lowerQuestion.startsWith('yes') ||
+    lowerQuestion.startsWith('show') ||
+    lowerQuestion.startsWith('break') ||
+    lowerQuestion.length < 20
+  )) {
+    return previousDatabase;
+  }
+  
+  let logosScore = 0;
+  let animalScore = 0;
+  
+  for (const keyword of LOGOS_KEYWORDS) {
+    if (lowerQuestion.includes(keyword)) {
+      logosScore += keyword.includes(' ') ? 3 : 1; // Multi-word matches score higher
+    }
+  }
+  
+  for (const keyword of ANIMAL_KEYWORDS) {
+    if (lowerQuestion.includes(keyword)) {
+      animalScore += keyword.includes(' ') ? 3 : 1;
+    }
+  }
+  
+  console.log(`Database routing: Logos=${logosScore}, Animal=${animalScore}`);
+  
+  // Default to Animal if no clear winner (existing behavior)
+  return logosScore > animalScore ? 'Logos' : 'Animal';
+}
+
 function determineQueryType(question: string, hasPreviousSql: boolean): { type: QueryType; confidence: number } {
   const lowerQuestion = question.toLowerCase();
   
@@ -95,23 +160,28 @@ chatRoutes.post('/', async (c) => {
   const previousSql = body.previousSql;
   const previousQuestion = body.previousQuestion;
   const previousResponse = body.previousResponse;
+  const previousDatabase = body.previousDatabase;
   
   try {
     const { type: queryType, confidence } = determineQueryType(message, !!previousSql);
-    console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)}), hasPreviousSql: ${!!previousSql}, previousQuestion: ${previousQuestion?.substring(0, 50) || 'none'}, conversationId: ${conversationId}`);
+    
+    // Determine which database to query
+    const targetDatabase = body.filters?.database || determineDatabase(message, previousDatabase);
+    
+    console.log(`Query type: ${queryType} (confidence: ${confidence.toFixed(2)}), database: ${targetDatabase}, hasPreviousSql: ${!!previousSql}, previousQuestion: ${previousQuestion?.substring(0, 50) || 'none'}, conversationId: ${conversationId}`);
     
     if (queryType === 'sql' && c.env.AZURE_FUNCTION_URL) {
-      console.log('Attempting Azure SQL query path via Function proxy...');
+      console.log(`Attempting Azure SQL query path via Function proxy to ${targetDatabase} database...`);
 
       // Use agent mode for new queries (no previous context) or when explicitly requested
       const useAgentMode = body.useAgent !== false && !previousSql;
       
       if (useAgentMode) {
-        console.log('Using AGENT mode for multi-step query exploration...');
+        console.log(`Using AGENT mode for multi-step query exploration on ${targetDatabase}...`);
         const agentService = new AgentSqlService(c.env);
         
         try {
-          const { answer, steps, finalSql } = await agentService.queryWithAgent(message);
+          const { answer, steps, finalSql } = await agentService.queryWithAgent(message, targetDatabase);
           
           console.log(`Agent completed with ${steps.length} steps`);
           
@@ -119,7 +189,7 @@ chatRoutes.post('/', async (c) => {
           const sources: Source[] = [{
             table: 'Agent Analysis',
             id: 'agent',
-            snippet: finalSql || `Explored database in ${steps.length} steps`,
+            snippet: finalSql || `Explored ${targetDatabase} database in ${steps.length} steps`,
             score: confidence,
           }];
           
@@ -129,6 +199,7 @@ chatRoutes.post('/', async (c) => {
             conversationId,
             lastSql: finalSql,
             lastQuestion: message,
+            lastDatabase: targetDatabase,
           };
           
           return c.json(chatResponse);
@@ -140,7 +211,7 @@ chatRoutes.post('/', async (c) => {
       }
       
       // Simple query mode (follow-ups or fallback)
-      console.log('Using SIMPLE mode for direct query...');
+      console.log(`Using SIMPLE mode for direct query on ${targetDatabase}...`);
       const sqlService = new SqlService(c.env);
       
       let result: Awaited<ReturnType<typeof sqlService.queryWithNaturalLanguage>>['result'];
@@ -152,7 +223,7 @@ chatRoutes.post('/', async (c) => {
           console.log(`Using previous SQL for follow-up: ${previousSql.substring(0, 80)}...`);
           const queryResult = await sqlService.queryWithNaturalLanguage(
             message,
-            body.filters?.database,
+            targetDatabase,
             previousSql,
             previousQuestion,
             previousResponse
@@ -169,7 +240,7 @@ chatRoutes.post('/', async (c) => {
               : message;
             const queryResult = await sqlService.queryWithNaturalLanguage(
               retryQuestion,
-              body.filters?.database
+              targetDatabase
             );
             result = queryResult.result;
             generatedSql = queryResult.generatedSql;
@@ -178,7 +249,7 @@ chatRoutes.post('/', async (c) => {
             console.error('Retry also failed, falling back to standalone query:', retryError);
             const queryResult = await sqlService.queryWithNaturalLanguage(
               message,
-              body.filters?.database
+              targetDatabase
             );
             result = queryResult.result;
             generatedSql = queryResult.generatedSql;
@@ -187,7 +258,7 @@ chatRoutes.post('/', async (c) => {
       } else {
         const queryResult = await sqlService.queryWithNaturalLanguage(
           message,
-          body.filters?.database
+          targetDatabase
         );
         result = queryResult.result;
         generatedSql = queryResult.generatedSql;
@@ -208,6 +279,7 @@ chatRoutes.post('/', async (c) => {
         conversationId,
         lastSql: generatedSql,
         lastQuestion: message,
+        lastDatabase: targetDatabase,
       };
       
       return c.json(chatResponse);

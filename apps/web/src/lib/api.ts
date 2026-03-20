@@ -8,7 +8,8 @@ class ChatApi {
     conversationId?: string,
     previousSql?: string,
     previousQuestion?: string,
-    previousResponse?: string
+    previousResponse?: string,
+    previousDatabase?: string
   ): Promise<ChatResponse> {
     const response = await fetch(`${API_BASE}/api/chat`, {
       method: 'POST',
@@ -21,6 +22,7 @@ class ChatApi {
         previousSql,
         previousQuestion,
         previousResponse,
+        previousDatabase,
       }),
     });
 

@@ -37,6 +37,7 @@ export interface ChatRequest {
   previousSql?: string;
   previousQuestion?: string;
   previousResponse?: string;  // The chatbot's previous response (for context on "yes" answers)
+  previousDatabase?: string;  // Which database was used in the last query
   useAgent?: boolean;  // Enable agentic multi-step query mode
   filters?: {
     database?: string;
@@ -51,6 +52,7 @@ export interface ChatResponse {
   lastSql?: string;
   lastQuestion?: string;
   lastResponse?: string;  // Store the response for next turn's context
+  lastDatabase?: string;  // Which database was queried
 }
 
 export interface ChartData {
