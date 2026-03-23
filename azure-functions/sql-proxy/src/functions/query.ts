@@ -33,14 +33,29 @@ function getDatabaseConfig(dbName: string): DatabaseConfig | null {
 }
 
 async function getConnection(dbName: string): Promise<sql.ConnectionPool> {
-  const existing = connectionPools.get(dbName);
-  if (existing && existing.connected) {
-    return existing;
-  }
-  
   const config = getDatabaseConfig(dbName);
   if (!config) {
     throw new Error(`Database '${dbName}' is not configured`);
+  }
+  
+  const existing = connectionPools.get(dbName);
+  if (existing && existing.connected) {
+    // Verify the cached connection is actually to the correct database
+    try {
+      const result = await existing.request().query('SELECT DB_NAME() as currentDb');
+      const currentDb = result.recordset[0]?.currentDb;
+      if (currentDb === config.database) {
+        return existing;
+      }
+      // Wrong database cached - close and recreate
+      console.log(`Connection pool mismatch: expected ${config.database}, got ${currentDb}. Recreating...`);
+      await existing.close();
+      connectionPools.delete(dbName);
+    } catch (e) {
+      // Connection is stale, recreate
+      console.log(`Connection pool stale for ${dbName}, recreating...`);
+      connectionPools.delete(dbName);
+    }
   }
   
   const pool = await sql.connect({
@@ -59,6 +74,15 @@ async function getConnection(dbName: string): Promise<sql.ConnectionPool> {
     },
   });
   
+  // Verify new connection is correct
+  const verifyResult = await pool.request().query('SELECT DB_NAME() as currentDb');
+  const actualDb = verifyResult.recordset[0]?.currentDb;
+  if (actualDb !== config.database) {
+    await pool.close();
+    throw new Error(`Failed to connect to ${config.database}, got ${actualDb} instead`);
+  }
+  
+  console.log(`Connected to database: ${actualDb} (requested: ${dbName})`);
   connectionPools.set(dbName, pool);
   return pool;
 }
