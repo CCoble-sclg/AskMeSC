@@ -392,12 +392,39 @@ When ready to answer, use final_answer tool.`;
 
       let action: { thought: string; tool: string; parameters: Record<string, unknown> };
       try {
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) throw new Error('No JSON found');
-        action = JSON.parse(jsonMatch[0]);
+        // Find all JSON objects in the response and take the first valid one
+        const jsonMatches = response.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g);
+        if (!jsonMatches || jsonMatches.length === 0) {
+          throw new Error('No JSON found in response');
+        }
+        
+        // Try to parse the first JSON object that has the required fields
+        let parsed = null;
+        for (const match of jsonMatches) {
+          try {
+            const candidate = JSON.parse(match);
+            if (candidate.thought && candidate.tool) {
+              parsed = candidate;
+              break;
+            }
+          } catch {
+            continue;
+          }
+        }
+        
+        if (!parsed) {
+          throw new Error('No valid action JSON found');
+        }
+        action = parsed;
       } catch (e) {
-        console.error('Failed to parse agent response:', response);
-        steps.push({ thought: 'Failed to parse action', result: response });
+        console.error('Failed to parse agent response:', e, 'Response:', response.substring(0, 500));
+        // Don't break - try to continue with a generic exploration step
+        if (i < 3) {
+          // Early in exploration, try listing tables
+          steps.push({ thought: 'Parse error, retrying exploration', result: `Parse error: ${e}` });
+          continue;
+        }
+        steps.push({ thought: 'Failed to parse action after multiple attempts', result: String(e) });
         break;
       }
 
