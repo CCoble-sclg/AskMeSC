@@ -2,7 +2,7 @@ import type { Env } from '../types';
 import { ClaudeService } from './claude';
 import { SchemaCache } from './schema-cache';
 
-const MAX_ITERATIONS = 30;
+const MAX_ITERATIONS = 40;
 const MAX_ROWS = 50;
 
 const PROGRESS_MESSAGES: Record<string, string[]> = {
