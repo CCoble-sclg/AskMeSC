@@ -18,7 +18,7 @@ function getProgressMessage(tool: string, iteration: number): string {
   return messages[iteration % messages.length];
 }
 
-export type ProgressCallback = (message: string, step: number, total: number) => void;
+export type ProgressCallback = (message: string, step: number, total: number) => void | Promise<void>;
 
 interface AgentTool {
   name: string;
@@ -390,7 +390,7 @@ If you have enough information, use the final_answer tool.`;
     let finalSql = '';
 
     // Send initial progress
-    onProgress?.('Understanding your question...', 0, MAX_ITERATIONS);
+    await onProgress?.('Understanding your question...', 0, MAX_ITERATIONS);
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       // Add delay between iterations to avoid rate limiting
@@ -399,7 +399,7 @@ If you have enough information, use the final_answer tool.`;
       }
       
       // Send thinking progress
-      onProgress?.(getProgressMessage('thinking', i), i + 1, MAX_ITERATIONS);
+      await onProgress?.(getProgressMessage('thinking', i), i + 1, MAX_ITERATIONS);
       
       // Only keep last 5 steps to reduce prompt size
       const recentSteps = steps.slice(-5);
@@ -432,7 +432,7 @@ If you have enough information, use the final_answer tool.`;
 
       // Check if this is the final answer
       if (action.tool === 'final_answer') {
-        onProgress?.('Preparing your answer...', i + 1, MAX_ITERATIONS);
+        await onProgress?.('Preparing your answer...', i + 1, MAX_ITERATIONS);
         finalAnswer = action.parameters.answer as string;
         finalSql = action.parameters.sql_used as string || '';
         steps.push(step);
@@ -440,7 +440,7 @@ If you have enough information, use the final_answer tool.`;
       }
 
       // Send progress update for the tool being executed
-      onProgress?.(getProgressMessage(action.tool, i), i + 1, MAX_ITERATIONS);
+      await onProgress?.(getProgressMessage(action.tool, i), i + 1, MAX_ITERATIONS);
 
       // Execute the tool
       const result = await this.executeTool(action.tool, action.parameters || {});

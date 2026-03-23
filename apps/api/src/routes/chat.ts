@@ -400,8 +400,8 @@ chatRoutes.post('/stream', async (c) => {
       const agentService = new AgentSqlService(c.env);
       
       // Progress callback that sends SSE events
-      const onProgress: ProgressCallback = (progressMessage, step, total) => {
-        stream.writeSSE({
+      const onProgress: ProgressCallback = async (progressMessage, step, total) => {
+        await stream.writeSSE({
           event: 'progress',
           data: JSON.stringify({ message: progressMessage, step, total }),
         });
@@ -428,13 +428,13 @@ chatRoutes.post('/stream', async (c) => {
         lastDatabase: targetDatabase,
       };
 
-      stream.writeSSE({
+      await stream.writeSSE({
         event: 'complete',
         data: JSON.stringify(response),
       });
     } catch (error) {
       console.error('Stream error:', error);
-      stream.writeSSE({
+      await stream.writeSSE({
         event: 'error',
         data: JSON.stringify({ error: error instanceof Error ? error.message : 'Streaming failed' }),
       });

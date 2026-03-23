@@ -75,6 +75,7 @@ class ChatApi {
     const decoder = new TextDecoder();
     let buffer = '';
     let finalResponse: ChatResponse | null = null;
+    let currentEventType = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -85,25 +86,36 @@ class ChatApi {
       buffer = lines.pop() || '';
 
       for (const line of lines) {
-        if (line.startsWith('event:')) {
-          const eventType = line.slice(6).trim();
+        const trimmedLine = line.trim();
+        
+        if (trimmedLine.startsWith('event:')) {
+          currentEventType = trimmedLine.slice(6).trim();
           continue;
         }
-        if (line.startsWith('data:')) {
-          const data = line.slice(5).trim();
+        
+        if (trimmedLine.startsWith('data:')) {
+          const data = trimmedLine.slice(5).trim();
+          if (!data) continue;
+          
           try {
             const parsed = JSON.parse(data);
-            if (parsed.message && parsed.step !== undefined) {
+            
+            if (currentEventType === 'progress' && parsed.message) {
               onProgress(parsed as ProgressEvent);
-            } else if (parsed.response) {
+            } else if (currentEventType === 'complete' && parsed.response) {
               finalResponse = parsed as ChatResponse;
-            } else if (parsed.error) {
+            } else if (currentEventType === 'error' && parsed.error) {
               throw new Error(parsed.error);
+            } else if (parsed.response) {
+              // Fallback: detect complete response without event type
+              finalResponse = parsed as ChatResponse;
             }
           } catch (e) {
             if (e instanceof SyntaxError) continue;
             throw e;
           }
+          
+          currentEventType = ''; // Reset after processing data
         }
       }
     }

@@ -48,18 +48,25 @@
         // Use regular endpoint for follow-ups (faster)
         response = await chatApi.sendMessage(text, conversationId, lastSql, lastQuestion, lastResponse, lastDatabase);
       } else {
-        // Use streaming endpoint for new queries (shows progress)
-        response = await chatApi.sendMessageWithProgress(
-          text,
-          (event: ProgressEvent) => {
-            progressMessage = event.message;
-          },
-          conversationId,
-          lastSql,
-          lastQuestion,
-          lastResponse,
-          lastDatabase
-        );
+        // Try streaming endpoint for new queries (shows progress)
+        try {
+          response = await chatApi.sendMessageWithProgress(
+            text,
+            (event: ProgressEvent) => {
+              progressMessage = event.message;
+            },
+            conversationId,
+            lastSql,
+            lastQuestion,
+            lastResponse,
+            lastDatabase
+          );
+        } catch (streamError) {
+          // Fallback to regular endpoint if streaming fails
+          console.warn('Streaming failed, falling back to regular endpoint:', streamError);
+          progressMessage = 'Processing your request...';
+          response = await chatApi.sendMessage(text, conversationId, lastSql, lastQuestion, lastResponse, lastDatabase);
+        }
       }
       
       conversationId = response.conversationId;
