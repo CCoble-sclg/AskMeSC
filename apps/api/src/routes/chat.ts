@@ -39,6 +39,7 @@ const LOGOS_KEYWORDS = [
   'revenue', 'fund', 'funds', 'account', 'accounts', 'gl', 'general ledger',
   'accounts payable', 'accounts receivable', 'ap', 'ar', 'check', 'checks',
   'fiscal', 'appropriation', 'encumbrance', 'expenditure', 'expenditures',
+  'balance', 'remaining balance', 'line item', 'cost center', 'object code',
   // Utility Billing
   'utility', 'utilities', 'water', 'sewer', 'garbage', 'trash', 'bill', 'bills',
   'billing', 'meter', 'meters', 'reading', 'readings', 'usage', 'consumption',
@@ -59,6 +60,14 @@ const ANIMAL_KEYWORDS = [
 // Determine which database to query based on the question
 function determineDatabase(question: string, previousDatabase?: string): string {
   const lowerQuestion = question.toLowerCase();
+  
+  // Check for GL account number pattern (e.g., 110.4210.291 or 110.4210 291)
+  // This is a strong indicator of Logos database
+  const glAccountPattern = /\d{2,3}\.\d{3,4}[\.\s]\d{2,3}/;
+  if (glAccountPattern.test(question)) {
+    console.log('Detected GL account pattern, routing to Logos');
+    return 'Logos';
+  }
   
   // If we have context from a previous query, stay on that database for follow-ups
   if (previousDatabase && (
