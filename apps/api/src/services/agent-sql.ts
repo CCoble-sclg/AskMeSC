@@ -111,9 +111,15 @@ export class AgentSqlService {
   }
 
   private async listDatabases(): Promise<string> {
-    // Return known databases - these are configured in the Azure Function
-    const databases = ['Animal', 'Logos'];
-    return `Available databases:\n- Animal: Animal shelter/control records\n- Logos: County ERP system (HR, Finance, Utility Billing)`;
+    return `Available databases:
+
+1. Animal - Animal shelter/kennel management system
+   - Contains tables like: kennel, animal, person, tag, bite, violation, treatment
+   - Use this for questions about: animals in shelter, adoptions, euthanasia, strays, bites, violations
+
+2. Logos - County ERP system (Tyler Technologies Munis)
+   - Contains tables like: GLAccount, JournalDetail, Vendor, Employee, PurchaseOrder, UtilityAccount
+   - Use this for questions about: employees, payroll, budgets, expenses, vendors, utilities, permits`;
   }
 
   private async listTables(database: string): Promise<string> {

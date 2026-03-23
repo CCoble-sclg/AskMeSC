@@ -4,8 +4,27 @@ import type { Env, ChatRequest, ChatResponse, Source } from '../types';
 import { AgentSqlService, type ProgressCallback } from '../services/agent-sql';
 import { RagService } from '../services/rag';
 import { RateLimitError } from '../services/claude';
+import { SchemaCache } from '../services/schema-cache';
 
 export const chatRoutes = new Hono<{ Bindings: Env }>();
+
+// Admin endpoint to clear schema cache
+chatRoutes.post('/clear-cache', async (c) => {
+  try {
+    const cache = new SchemaCache(c.env);
+    const body = await c.req.json<{ database?: string }>().catch(() => ({}));
+    
+    if (body.database) {
+      await cache.clearDatabase(body.database);
+      return c.json({ success: true, message: `Cleared cache for ${body.database} database` });
+    } else {
+      await cache.clearAll();
+      return c.json({ success: true, message: 'Cleared all schema cache' });
+    }
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
+  }
+});
 
 // Simple check if this looks like a document/policy question
 function isDocumentQuestion(question: string): boolean {
