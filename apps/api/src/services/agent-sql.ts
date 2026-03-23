@@ -425,18 +425,35 @@ When ready to answer, use final_answer tool.`;
     }
 
     if (!finalAnswer) {
+      // Get any query results we found
       const queryResults = steps
         .filter(s => s.tool === 'run_query' && s.result && !s.result.includes('error'))
         .map(s => s.result)
-        .join('\n');
+        .join('\n\n');
       
       if (queryResults) {
         finalAnswer = 'Based on my database exploration, here is what I found:\n\n' +
           queryResults + '\n\n' +
           'Note: I reached my exploration limit. The data above should help answer your question.';
       } else {
-        finalAnswer = 'I explored the database but could not determine a complete answer. Here is what I found:\n\n' +
-          steps.map(s => s.result).filter(Boolean).join('\n\n');
+        // Summarize what we learned without dumping everything
+        const tablesExplored = steps
+          .filter(s => s.tool === 'describe_table')
+          .map(s => s.parameters?.table_name)
+          .filter(Boolean);
+        
+        const lastThought = steps
+          .filter(s => s.thought && s.thought !== 'Failed to parse action')
+          .slice(-1)[0]?.thought || '';
+        
+        if (tablesExplored.length > 0) {
+          finalAnswer = `I was exploring the database to answer your question. I examined the following tables: ${tablesExplored.join(', ')}.\n\n` +
+            `However, I wasn't able to complete my analysis. ${lastThought ? `My last observation: ${lastThought}` : ''}\n\n` +
+            'Please try asking your question again, or try being more specific about what you\'re looking for.';
+        } else {
+          finalAnswer = 'I started exploring the database but encountered an issue before I could complete my analysis.\n\n' +
+            'Please try asking your question again. If the problem persists, try being more specific about which data you need.';
+        }
       }
     }
 
