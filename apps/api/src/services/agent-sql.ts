@@ -150,23 +150,36 @@ export class AgentSqlService {
   private getLogosStaticTableList(): string {
     return `Tables in Logos ERP database:
 
-This is a new database - use describe_table and sample_values to discover the schema.
+KEY TABLES:
+- [dbo].[GLAccount] - Chart of accounts (GLAccountID, GLAccountDelimitedFull like "110.4210.291")
+- [dbo].[JournalDetail] - All financial transactions (expenses, budgets, journals)
+- [dbo].[JournalHeader] - Transaction headers
+- [dbo].[Vendor] - Vendor/supplier master
+- [dbo].[AccountsPayableInvoice] - AP invoices
+- [dbo].[PurchaseOrder] - Purchase orders
+- [dbo].[Employee] (in HR schema) - Employee data
+- [dbo].[UtilityAccount] - Utility billing accounts
 
-TYPICAL ERP TABLES (explore to confirm):
-- Employee/Personnel tables (HR data)
-- Vendor/Supplier tables
-- Invoice/Payment tables (Accounts Payable)
-- Customer/Account tables (Utility Billing)
-- Budget/GL Account tables (Finance)
-- Purchase Order tables
+CRITICAL DOMAIN KNOWLEDGE - BUDGET vs EXPENSES:
+The JournalDetail table contains BOTH budget entries AND actual expenses.
+The [Source] column distinguishes them:
+- Source = 'BudgetProcessing' → Original budget/appropriation amounts
+- Source = 'AccountsPayable', 'PurchaseOrders', 'JournalEntries', etc. → Actual expenses
 
-EXPLORATION STRATEGY:
-1. Use list_tables to see all available tables
-2. Use describe_table on tables that look relevant to the question
-3. Use sample_values to understand what data is in key columns
-4. Build your query based on what you discover
+COMMON QUERY PATTERNS:
+- Budget amount: WHERE Source = 'BudgetProcessing'
+- Actual expenses: WHERE Source <> 'BudgetProcessing'
+- Available balance: Budget amount - Expenses
 
-Start by exploring with describe_table on tables that seem relevant to the user's question.`;
+Example - Get expenses for a GL account in FY2026:
+SELECT SUM(Amount) as Expenses 
+FROM dbo.JournalDetail 
+WHERE GLAccountID = [id] AND FiscalEndYear = 2026 AND Source <> 'BudgetProcessing'
+
+To find GLAccountID from account string like "110.4210.291":
+SELECT GLAccountID FROM dbo.GLAccount WHERE GLAccountDelimitedFull LIKE '%110.4210%291%'
+
+Still use describe_table and sample_values to discover additional columns and patterns.`;
   }
 
   private getAnimalStaticTableList(): string {
