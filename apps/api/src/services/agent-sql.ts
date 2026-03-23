@@ -114,12 +114,15 @@ export class AgentSqlService {
     return `Available databases:
 
 1. Animal - Animal shelter/kennel management system
-   - Contains tables like: kennel, animal, person, tag, bite, violation, treatment
-   - Use this for questions about: animals in shelter, adoptions, euthanasia, strays, bites, violations
+   - KEY TABLE: [dbo].[kennel] - Current animal assignments. Use outcome_date IS NULL for animals currently in shelter.
+   - Other tables: animal (master records - often stale), person, tag, bite, violation, treatment
+   - IMPORTANT: To count animals CURRENTLY in shelter, use: SELECT COUNT(*) FROM kennel WHERE outcome_date IS NULL AND location = 'SHELTER'
+   - The 'animal' table has stale status data - prefer 'kennel' table for current counts
 
 2. Logos - County ERP system (Tyler Technologies Munis)
-   - Contains tables like: GLAccount, JournalDetail, Vendor, Employee, PurchaseOrder, UtilityAccount
-   - Use this for questions about: employees, payroll, budgets, expenses, vendors, utilities, permits`;
+   - KEY TABLE: [dbo].[JournalDetail] - All financial transactions. Use Source column to distinguish budget vs expenses.
+   - Other tables: GLAccount, Vendor, PurchaseOrder, HR.Employee, UtilityAccount
+   - IMPORTANT: For budget queries, Source='BudgetProcessing' is budget, other sources are expenses`;
   }
 
   private async listTables(database: string): Promise<string> {
