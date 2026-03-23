@@ -2,10 +2,11 @@
   import ChatMessage from './ChatMessage.svelte';
   import ChatInput from './ChatInput.svelte';
   import type { Message } from '$lib/types';
-  import { chatApi } from '$lib/api';
+  import { chatApi, type ProgressEvent } from '$lib/api';
 
   let messages: Message[] = $state([]);
   let isLoading = $state(false);
+  let progressMessage = $state('Searching records...');
   let conversationId = $state<string | undefined>(undefined);
   let lastSql = $state<string | undefined>(undefined);
   let lastQuestion = $state<string | undefined>(undefined);
@@ -36,14 +37,36 @@
 
     // Show loading state
     isLoading = true;
+    progressMessage = 'Understanding your question...';
 
     try {
-      const response = await chatApi.sendMessage(text, conversationId, lastSql, lastQuestion, lastResponse, lastDatabase);
+      // Use streaming for new queries (no previous SQL context), regular for follow-ups
+      const isFollowUp = !!lastSql;
+      
+      let response;
+      if (isFollowUp) {
+        // Use regular endpoint for follow-ups (faster)
+        response = await chatApi.sendMessage(text, conversationId, lastSql, lastQuestion, lastResponse, lastDatabase);
+      } else {
+        // Use streaming endpoint for new queries (shows progress)
+        response = await chatApi.sendMessageWithProgress(
+          text,
+          (event: ProgressEvent) => {
+            progressMessage = event.message;
+          },
+          conversationId,
+          lastSql,
+          lastQuestion,
+          lastResponse,
+          lastDatabase
+        );
+      }
+      
       conversationId = response.conversationId;
       lastSql = response.lastSql;
       lastQuestion = response.lastQuestion;
-      lastResponse = response.response;  // Store the response for context on follow-ups
-      lastDatabase = response.lastDatabase;  // Track which database was used
+      lastResponse = response.response;
+      lastDatabase = response.lastDatabase;
 
       // Add assistant message
       const assistantMessage: Message = {
@@ -66,6 +89,7 @@
       messages = [...messages, errorMessage];
     } finally {
       isLoading = false;
+      progressMessage = 'Searching records...';
       scrollToBottom();
     }
   };
@@ -106,7 +130,7 @@
             <span></span>
             <span></span>
           </div>
-          <span class="loading-text">Searching records...</span>
+          <span class="loading-text">{progressMessage}</span>
         </div>
       {/if}
     {/if}

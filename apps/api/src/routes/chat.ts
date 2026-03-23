@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import type { Env, ChatRequest, ChatResponse, Source, QueryType } from '../types';
 import { RagService } from '../services/rag';
 import { SqlService } from '../services/sql';
-import { AgentSqlService } from '../services/agent-sql';
+import { AgentSqlService, type ProgressCallback } from '../services/agent-sql';
 import { SchemaService } from '../services/schema';
 import { RateLimitError } from '../services/claude';
 
@@ -379,7 +380,7 @@ ${contextInfo}`
   }
 });
 
-// Streaming endpoint for real-time responses
+// Streaming endpoint for real-time responses with progress updates
 chatRoutes.post('/stream', async (c) => {
   const body = await c.req.json<ChatRequest>();
   
@@ -387,20 +388,56 @@ chatRoutes.post('/stream', async (c) => {
     return c.json({ error: 'Message is required' }, 400);
   }
 
-  const rag = new RagService(c.env);
+  const message = body.message.trim();
+  const conversationId = body.conversationId || crypto.randomUUID();
+  const previousDatabase = body.previousDatabase;
 
-  try {
-    const stream = await rag.queryStream(body.message);
-    
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
-  } catch (error) {
-    console.error('Stream error:', error);
-    return c.json({ error: 'Streaming failed' }, 500);
-  }
+  // Determine database for routing
+  const targetDatabase = body.filters?.database || determineDatabase(message, previousDatabase);
+
+  return streamSSE(c, async (stream) => {
+    try {
+      const agentService = new AgentSqlService(c.env);
+      
+      // Progress callback that sends SSE events
+      const onProgress: ProgressCallback = (progressMessage, step, total) => {
+        stream.writeSSE({
+          event: 'progress',
+          data: JSON.stringify({ message: progressMessage, step, total }),
+        });
+      };
+
+      const { answer, steps, finalSql } = await agentService.queryWithAgent(
+        message,
+        targetDatabase,
+        onProgress
+      );
+
+      // Send the final response
+      const response: ChatResponse = {
+        response: answer,
+        sources: [{
+          table: 'Agent Analysis',
+          id: 'agent',
+          snippet: finalSql || `Explored ${targetDatabase} database in ${steps.length} steps`,
+          score: 0.9,
+        }],
+        conversationId,
+        lastSql: finalSql,
+        lastQuestion: message,
+        lastDatabase: targetDatabase,
+      };
+
+      stream.writeSSE({
+        event: 'complete',
+        data: JSON.stringify(response),
+      });
+    } catch (error) {
+      console.error('Stream error:', error);
+      stream.writeSSE({
+        event: 'error',
+        data: JSON.stringify({ error: error instanceof Error ? error.message : 'Streaming failed' }),
+      });
+    }
+  });
 });

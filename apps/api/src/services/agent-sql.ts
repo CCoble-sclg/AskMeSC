@@ -4,6 +4,22 @@ import { ClaudeService } from './claude';
 const MAX_ITERATIONS = 20;
 const MAX_ROWS = 50;
 
+// Safe, generic progress messages that don't expose database details
+const PROGRESS_MESSAGES: Record<string, string[]> = {
+  list_tables: ['Exploring database structure...', 'Discovering available data...'],
+  describe_table: ['Examining data fields...', 'Understanding data structure...'],
+  sample_values: ['Analyzing data patterns...', 'Learning data characteristics...'],
+  run_query: ['Querying the database...', 'Retrieving information...', 'Processing your request...'],
+  thinking: ['Analyzing your question...', 'Determining best approach...', 'Planning next step...'],
+};
+
+function getProgressMessage(tool: string, iteration: number): string {
+  const messages = PROGRESS_MESSAGES[tool] || PROGRESS_MESSAGES['thinking'];
+  return messages[iteration % messages.length];
+}
+
+export type ProgressCallback = (message: string, step: number, total: number) => void;
+
 interface AgentTool {
   name: string;
   description: string;
@@ -361,7 +377,11 @@ Now decide your next action. Respond in this exact JSON format:
 If you have enough information, use the final_answer tool.`;
   }
 
-  async queryWithAgent(question: string, database: string = 'Animal'): Promise<{ answer: string; steps: AgentStep[]; finalSql?: string }> {
+  async queryWithAgent(
+    question: string, 
+    database: string = 'Animal',
+    onProgress?: ProgressCallback
+  ): Promise<{ answer: string; steps: AgentStep[]; finalSql?: string }> {
     this.currentDatabase = database;
     console.log(`Agent starting exploration of ${database} database for question: ${question.substring(0, 50)}...`);
     
@@ -369,11 +389,17 @@ If you have enough information, use the final_answer tool.`;
     let finalAnswer = '';
     let finalSql = '';
 
+    // Send initial progress
+    onProgress?.('Understanding your question...', 0, MAX_ITERATIONS);
+
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       // Add delay between iterations to avoid rate limiting
       if (i > 0) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
+      
+      // Send thinking progress
+      onProgress?.(getProgressMessage('thinking', i), i + 1, MAX_ITERATIONS);
       
       // Only keep last 5 steps to reduce prompt size
       const recentSteps = steps.slice(-5);
@@ -406,11 +432,15 @@ If you have enough information, use the final_answer tool.`;
 
       // Check if this is the final answer
       if (action.tool === 'final_answer') {
+        onProgress?.('Preparing your answer...', i + 1, MAX_ITERATIONS);
         finalAnswer = action.parameters.answer as string;
         finalSql = action.parameters.sql_used as string || '';
         steps.push(step);
         break;
       }
+
+      // Send progress update for the tool being executed
+      onProgress?.(getProgressMessage(action.tool, i), i + 1, MAX_ITERATIONS);
 
       // Execute the tool
       const result = await this.executeTool(action.tool, action.parameters || {});
