@@ -191,7 +191,16 @@ chatRoutes.post('/', async (c) => {
         const agentService = new AgentSqlService(c.env);
         
         try {
-          const { answer, steps, finalSql } = await agentService.queryWithAgent(message, targetDatabase);
+          const { answer, steps, finalSql } = await agentService.queryWithAgent(
+            message, 
+            targetDatabase,
+            undefined, // no progress callback for non-streaming
+            previousQuestion ? {
+              previousQuestion,
+              previousSql,
+              previousResponse,
+            } : undefined
+          );
           
           console.log(`Agent completed with ${steps.length} steps`);
           
@@ -400,6 +409,9 @@ chatRoutes.post('/stream', async (c) => {
   const message = body.message.trim();
   const conversationId = body.conversationId || crypto.randomUUID();
   const previousDatabase = body.previousDatabase;
+  const previousQuestion = body.previousQuestion;
+  const previousSql = body.previousSql;
+  const previousResponse = body.previousResponse;
 
   // Determine database for routing
   const targetDatabase = body.filters?.database || determineDatabase(message, previousDatabase);
@@ -419,7 +431,12 @@ chatRoutes.post('/stream', async (c) => {
       const { answer, steps, finalSql } = await agentService.queryWithAgent(
         message,
         targetDatabase,
-        onProgress
+        onProgress,
+        previousQuestion ? {
+          previousQuestion,
+          previousSql,
+          previousResponse,
+        } : undefined
       );
 
       // Send the final response

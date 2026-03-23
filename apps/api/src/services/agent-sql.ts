@@ -81,6 +81,11 @@ export class AgentSqlService {
   private env: Env;
   private claude: ClaudeService;
   private currentDatabase: string = 'Animal';
+  private conversationContext?: {
+    previousQuestion?: string;
+    previousSql?: string;
+    previousResponse?: string;
+  };
 
   constructor(env: Env) {
     this.env = env;
@@ -442,6 +447,15 @@ CRITICAL GUIDELINES:
    - Don't waste iterations exploring when the answer is known
    - Give final_answer as soon as you have good results
 
+${this.conversationContext?.previousQuestion ? `
+CONVERSATION CONTEXT (IMPORTANT):
+Previous question: "${this.conversationContext.previousQuestion}"
+${this.conversationContext.previousSql ? `Previous SQL: ${this.conversationContext.previousSql}` : ''}
+${this.conversationContext.previousResponse ? `Previous answer summary: ${this.conversationContext.previousResponse.substring(0, 500)}...` : ''}
+
+The user's current question is likely a FOLLOW-UP about the same subject (e.g., same GL account, same employee, same vendor).
+Extract key entities from the previous context and apply them to the current question!
+` : ''}
 USER QUESTION: ${question}
 
 ${stepHistory ? 'PREVIOUS STEPS:\n' + stepHistory + '\n\n' : ''}
@@ -458,9 +472,15 @@ If you have enough information, use the final_answer tool.`;
   async queryWithAgent(
     question: string, 
     database: string = 'Animal',
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
+    context?: {
+      previousQuestion?: string;
+      previousSql?: string;
+      previousResponse?: string;
+    }
   ): Promise<{ answer: string; steps: AgentStep[]; finalSql?: string }> {
     this.currentDatabase = database;
+    this.conversationContext = context;
     console.log(`Agent starting exploration of ${database} database for question: ${question.substring(0, 50)}...`);
     
     const steps: AgentStep[] = [];
