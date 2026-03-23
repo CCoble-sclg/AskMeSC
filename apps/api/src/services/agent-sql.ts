@@ -123,12 +123,12 @@ export class AgentSqlService {
   }
 
   private async listTables(database: string): Promise<string> {
-    // Check cache first
-    const cachedTables = await this.cache.getDatabaseTables(database);
-    if (cachedTables && cachedTables.length > 0) {
-      console.log(`Cache hit: ${database} tables (${cachedTables.length} tables)`);
-      return `Tables in ${database} database (from cache):\n${cachedTables.join('\n')}`;
-    }
+    // TEMPORARILY DISABLED CACHE - always fetch fresh
+    // const cachedTables = await this.cache.getDatabaseTables(database);
+    // if (cachedTables && cachedTables.length > 0) {
+    //   console.log(`Cache hit: ${database} tables (${cachedTables.length} tables)`);
+    //   return `Tables in ${database} database (from cache):\n${cachedTables.join('\n')}`;
+    // }
 
     // Fetch from Azure Function
     try {
@@ -160,8 +160,8 @@ export class AgentSqlService {
         `[${t.schema}].[${t.name}]`
       );
       
-      // Save to cache
-      await this.cache.setDatabaseTables(database, tableList);
+      // TEMPORARILY DISABLED CACHE WRITES
+      // await this.cache.setDatabaseTables(database, tableList);
       
       return `Tables in ${database} database:\n${tableList.join('\n')}`;
     } catch (e) {
@@ -175,13 +175,13 @@ export class AgentSqlService {
     const schema = cleanTable.includes('.') ? cleanTable.split('.')[0] : 'dbo';
     const name = cleanTable.includes('.') ? cleanTable.split('.')[1] : cleanTable;
     
-    // Check cache first
-    const cachedSchema = await this.cache.getTableSchema(database, schema, name);
-    if (cachedSchema) {
-      console.log(`Cache hit: ${database}.${schema}.${name} schema`);
-      const columns = cachedSchema.columns.map(c => `  - [${c.name}] (${c.type})`).join('\n');
-      return `Table [${schema}].[${name}] in ${database} (from cache):\n${columns}`;
-    }
+    // TEMPORARILY DISABLED CACHE
+    // const cachedSchema = await this.cache.getTableSchema(database, schema, name);
+    // if (cachedSchema) {
+    //   console.log(`Cache hit: ${database}.${schema}.${name} schema`);
+    //   const columns = cachedSchema.columns.map(c => `  - [${c.name}] (${c.type})`).join('\n');
+    //   return `Table [${schema}].[${name}] in ${database} (from cache):\n${columns}`;
+    // }
 
     // Fetch by querying
     try {
@@ -215,12 +215,12 @@ export class AgentSqlService {
     const schema = cleanTable.includes('.') ? cleanTable.split('.')[0] : 'dbo';
     const name = cleanTable.includes('.') ? cleanTable.split('.')[1] : cleanTable;
     
-    // Check cache first
-    const cachedValues = await this.cache.getSampleValues(database, schema, name, columnName);
-    if (cachedValues) {
-      console.log(`Cache hit: ${database}.${schema}.${name}.${columnName} samples`);
-      return `Sample values for [${columnName}] in [${schema}].[${name}] (from cache):\n${cachedValues.join(', ')}`;
-    }
+    // TEMPORARILY DISABLED CACHE
+    // const cachedValues = await this.cache.getSampleValues(database, schema, name, columnName);
+    // if (cachedValues) {
+    //   console.log(`Cache hit: ${database}.${schema}.${name}.${columnName} samples`);
+    //   return `Sample values for [${columnName}] in [${schema}].[${name}] (from cache):\n${cachedValues.join(', ')}`;
+    // }
 
     try {
       console.log(`Cache miss: Sampling ${database}.${schema}.${name}.${columnName}...`);
