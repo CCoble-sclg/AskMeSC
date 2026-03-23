@@ -148,38 +148,82 @@ export class AgentSqlService {
   }
 
   private getLogosStaticTableList(): string {
-    return `Tables in Logos ERP database:
+    return `Logos Database - Tyler Munis Government ERP
 
-KEY TABLES:
-- [dbo].[GLAccount] - Chart of accounts (GLAccountID, GLAccountDelimitedFull like "110.4210.291")
-- [dbo].[JournalDetail] - All financial transactions (expenses, budgets, journals)
-- [dbo].[JournalHeader] - Transaction headers
-- [dbo].[Vendor] - Vendor/supplier master
-- [dbo].[AccountsPayableInvoice] - AP invoices
-- [dbo].[PurchaseOrder] - Purchase orders
-- [dbo].[Employee] (in HR schema) - Employee data
-- [dbo].[UtilityAccount] - Utility billing accounts
+=== SCHEMA ORGANIZATION ===
+| Schema | Purpose |
+| dbo | Core financial, AP, AR, purchasing, assets, projects |
+| HR | Human resources, payroll, benefits, employees |
+| UT | Utility management extensions |
+| FM | Financial management extensions |
+| MCD | Mobile code enforcement, inspections |
 
-CRITICAL DOMAIN KNOWLEDGE - BUDGET vs EXPENSES:
-The JournalDetail table contains BOTH budget entries AND actual expenses.
-The [Source] column distinguishes them:
-- Source = 'BudgetProcessing' → Original budget/appropriation amounts
-- Source = 'AccountsPayable', 'PurchaseOrders', 'JournalEntries', etc. → Actual expenses
+=== GENERAL LEDGER (MOST IMPORTANT) ===
 
-COMMON QUERY PATTERNS:
-- Budget amount: WHERE Source = 'BudgetProcessing'
-- Actual expenses: WHERE Source <> 'BudgetProcessing'
-- Available balance: Budget amount - Expenses
+**dbo.GLAccount** - Chart of accounts
+- GLAccountID (PK), GLAccountDelimitedFull (e.g., "110.3500 330.50")
+- Note: Account format has SPACE: "110.3500 330.50" not "110.3500.330.50"
 
-Example - Get expenses for a GL account in FY2026:
-SELECT SUM(Amount) as Expenses 
-FROM dbo.JournalDetail 
-WHERE GLAccountID = [id] AND FiscalEndYear = 2026 AND Source <> 'BudgetProcessing'
+**dbo.JournalDetail** - ALL financial transactions (THE MAIN TABLE)
+- GLAccountID, FiscalEndYear, Amount, Source, Description, GLDate
 
-To find GLAccountID from account string like "110.4210.291":
-SELECT GLAccountID FROM dbo.GLAccount WHERE GLAccountDelimitedFull LIKE '%110.4210%291%'
+**CRITICAL: BUDGET vs EXPENSES (Source column)**
+BUDGET sources (exclude from expense calcs):
+- 'BudgetProcessing' - Original budget
+- 'BA YYYY-##' - Budget amendments
+- 'Budget' - Budget entries
 
-Still use describe_table and sample_values to discover additional columns and patterns.`;
+EXPENSE sources (actual spending):
+- 'Accounts Payable', 'Purchase Orders', 'JE-###', 'Payroll Post', etc.
+
+**Budget vs Actual Query Pattern:**
+SELECT 
+  SUM(CASE WHEN Source = 'BudgetProcessing' THEN Amount ELSE 0 END) as Budget,
+  SUM(CASE WHEN Source LIKE 'BA %' THEN Amount ELSE 0 END) as Amendments,
+  SUM(CASE WHEN Source NOT IN ('BudgetProcessing') AND Source NOT LIKE 'BA %' AND Source NOT LIKE 'Budget%' THEN Amount ELSE 0 END) as Expenses
+FROM dbo.JournalDetail WHERE GLAccountID = [id] AND FiscalEndYear = 2026
+
+Remaining Balance = Budget + Amendments - Expenses
+
+=== ACCOUNTS PAYABLE ===
+- dbo.Vendor (VendorID, VendorNumber, CentralNameID, ActiveFlag)
+- dbo.AccountsPayableInvoice (InvoiceID, VendorID, InvoiceNumber, InvoiceAmount, InvoiceDate)
+
+=== PURCHASING ===
+- dbo.PurchaseOrder (PurchaseOrderID, PONumber, VendorID, FiscalYear, ProcessStatus)
+- dbo.PurchaseOrderDetail (line items)
+
+=== HUMAN RESOURCES (HR schema) ===
+- HR.Employee (EmployeeId, EmployeeNumber, RecordStatus)
+- HR.EmployeeName (EmployeeId, FirstName, LastName, EffectiveEndDate)
+- HR.EmployeeJob (EmployeeId, Title, RateAmount, DepartmentId, IsPrimaryJob, EffectiveEndDate)
+
+**Active Employee Query:**
+SELECT e.EmployeeNumber, en.FirstName, en.LastName, ej.Title
+FROM HR.Employee e
+JOIN HR.EmployeeName en ON e.EmployeeId = en.EmployeeId
+JOIN HR.EmployeeJob ej ON e.EmployeeId = ej.EmployeeId
+WHERE e.RecordStatus = 1 AND en.EffectiveEndDate IS NULL AND ej.EffectiveEndDate IS NULL AND ej.IsPrimaryJob = 1
+
+=== UTILITY BILLING ===
+- dbo.UtilityCustomerAccount, dbo.UtilityAccount
+- dbo.UtilityTransactionHeader / UtilityTransactionDetail
+
+=== OTHER KEY TABLES ===
+- dbo.Permit - Building permits
+- MCD.Inspection - Inspections
+- dbo.Asset - Fixed assets
+- dbo.Grants - Grant tracking
+- dbo.Project - Project tracking
+- dbo.Receipt - Cash receipts
+- dbo.CentralName - Shared name/address table (LastName, FirstName, CentralNameID)
+
+=== CRITICAL NOTES ===
+1. ALWAYS filter by FiscalEndYear for balances
+2. ALWAYS separate Budget from Expenses using Source
+3. Check EffectiveEndDate IS NULL for current HR records
+4. Check ActiveFlag for master records
+5. Use CentralNameID to link names across modules`;
   }
 
   private getAnimalStaticTableList(): string {
