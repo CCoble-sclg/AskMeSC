@@ -123,50 +123,48 @@ export class AgentSqlService {
   }
 
   private async listTables(database: string): Promise<string> {
-    // TEMPORARILY DISABLED CACHE - always fetch fresh
-    // const cachedTables = await this.cache.getDatabaseTables(database);
-    // if (cachedTables && cachedTables.length > 0) {
-    //   console.log(`Cache hit: ${database} tables (${cachedTables.length} tables)`);
-    //   return `Tables in ${database} database (from cache):\n${cachedTables.join('\n')}`;
-    // }
-
     // Fetch from Azure Function
     try {
-      console.log(`Cache miss: Fetching ${database} tables from Azure Function...`);
+      const url = `${this.env.AZURE_FUNCTION_URL}/api/schema?database=${database}`;
+      console.log(`Fetching tables from: ${url}`);
+      
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
       
-      const response = await fetch(
-        `${this.env.AZURE_FUNCTION_URL}/api/schema?database=${database}`,
-        { 
-          headers: { 'x-api-key': this.env.AZURE_FUNCTION_KEY },
-          signal: controller.signal
-        }
-      );
+      const response = await fetch(url, { 
+        headers: { 'x-api-key': this.env.AZURE_FUNCTION_KEY },
+        signal: controller.signal
+      });
       
       clearTimeout(timeoutId);
       
+      console.log(`Schema response status: ${response.status} for database: ${database}`);
+      
       if (!response.ok) {
-        return `Error fetching tables: HTTP ${response.status}`;
+        const errorText = await response.text();
+        console.error(`Schema error response: ${errorText}`);
+        return `Error fetching tables from ${database}: HTTP ${response.status} - ${errorText}`;
       }
       
       const data = await response.json();
+      console.log(`Schema returned ${data.tables?.length || 0} tables for ${database}`);
       
       if (!data.tables || data.tables.length === 0) {
-        return `No tables found in ${database} database`;
+        return `No tables found in ${database} database. The database may be empty or not configured.`;
       }
+      
+      // Show first few table names in log
+      const firstTables = data.tables.slice(0, 5).map((t: any) => t.name).join(', ');
+      console.log(`First tables in ${database}: ${firstTables}...`);
       
       const tableList = data.tables.map((t: any) => 
         `[${t.schema}].[${t.name}]`
       );
       
-      // TEMPORARILY DISABLED CACHE WRITES
-      // await this.cache.setDatabaseTables(database, tableList);
-      
-      return `Tables in ${database} database:\n${tableList.join('\n')}`;
+      return `Tables in ${database} database (${tableList.length} total):\n${tableList.join('\n')}`;
     } catch (e) {
-      console.error('Error listing tables:', e);
-      return `Error listing tables: ${e}`;
+      console.error(`Error listing tables for ${database}:`, e);
+      return `Error listing tables from ${database}: ${e}`;
     }
   }
 
@@ -244,6 +242,9 @@ export class AgentSqlService {
 
   private async runQuery(database: string, sql: string): Promise<string> {
     try {
+      console.log(`Running query on DATABASE: ${database}`);
+      console.log(`SQL: ${sql.substring(0, 200)}...`);
+      
       if (!sql.trim().toUpperCase().startsWith('SELECT')) {
         return 'Error: Only SELECT queries are allowed';
       }
@@ -254,10 +255,15 @@ export class AgentSqlService {
       
       const result = await this.callAzureFunction('query', { database, query: sql });
       
-      if (result.error) return `Query error: ${result.error}`;
+      if (result.error) {
+        console.error(`Query error on ${database}: ${result.error}`);
+        return `Query error on ${database}: ${result.error}`;
+      }
+      
+      console.log(`Query on ${database} returned ${result.rowCount} rows`);
       
       if (!result.rows?.length) {
-        return `Query returned 0 rows.\nSQL: ${sql}`;
+        return `Query on ${database} returned 0 rows.\nSQL: ${sql}`;
       }
       
       const columns = Object.keys(result.rows[0]);
@@ -265,9 +271,10 @@ export class AgentSqlService {
         columns.map(c => `${c}: ${r[c]}`).join(', ')
       ).join('\n');
       
-      return `Query returned ${result.rowCount} rows:\n${rows}${result.rowCount > 20 ? `\n... and ${result.rowCount - 20} more` : ''}\n\nSQL: ${sql}`;
+      return `Query on ${database} returned ${result.rowCount} rows:\n${rows}${result.rowCount > 20 ? `\n... and ${result.rowCount - 20} more` : ''}\n\nSQL: ${sql}`;
     } catch (e) {
-      return `Query execution error: ${e}`;
+      console.error(`Query execution error on ${database}:`, e);
+      return `Query execution error on ${database}: ${e}`;
     }
   }
 
