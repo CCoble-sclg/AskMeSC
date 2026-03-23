@@ -23,6 +23,11 @@ index_name = "askmesc-index"
 [ai]
 binding = "AI"
 
+# KV namespace for schema cache (learned database knowledge)
+[[kv_namespaces]]
+binding = "SCHEMA_CACHE"
+id = "b8ac07cf241f40199adb54d9c06c9204"
+
 # Environment variables (secrets should use wrangler secret)
 [vars]
 ENVIRONMENT = "development"

@@ -1,10 +1,10 @@
-import type { Env, QueryResult } from '../types';
+import type { Env } from '../types';
 import { ClaudeService } from './claude';
+import { SchemaCache } from './schema-cache';
 
 const MAX_ITERATIONS = 20;
 const MAX_ROWS = 50;
 
-// Safe, generic progress messages that don't expose database details
 const PROGRESS_MESSAGES: Record<string, string[]> = {
   list_tables: ['Exploring database structure...', 'Discovering available data...'],
   describe_table: ['Examining data fields...', 'Understanding data structure...'],
@@ -26,11 +26,6 @@ interface AgentTool {
   parameters: Record<string, { type: string; description: string; required?: boolean }>;
 }
 
-interface ToolCall {
-  tool: string;
-  parameters: Record<string, unknown>;
-}
-
 interface AgentStep {
   thought: string;
   tool?: string;
@@ -40,21 +35,30 @@ interface AgentStep {
 
 const AGENT_TOOLS: AgentTool[] = [
   {
-    name: 'list_tables',
-    description: 'Get a list of all tables in the database with their schemas',
+    name: 'list_databases',
+    description: 'List all available databases you can query',
     parameters: {}
   },
   {
-    name: 'describe_table',
-    description: 'Get detailed column information for a specific table',
+    name: 'list_tables',
+    description: 'Get a list of tables in a database',
     parameters: {
-      table_name: { type: 'string', description: 'The table name (e.g., "kennel" or "dbo.kennel")', required: true }
+      database: { type: 'string', description: 'The database name (e.g., "Animal" or "Logos")', required: true }
+    }
+  },
+  {
+    name: 'describe_table',
+    description: 'Get column information for a specific table',
+    parameters: {
+      database: { type: 'string', description: 'The database name', required: true },
+      table_name: { type: 'string', description: 'The table name (e.g., "kennel" or "dbo.GLAccount")', required: true }
     }
   },
   {
     name: 'sample_values',
-    description: 'Get distinct sample values from a column to understand what data exists',
+    description: 'Get sample values from a column to understand what data exists',
     parameters: {
+      database: { type: 'string', description: 'The database name', required: true },
       table_name: { type: 'string', description: 'The table name', required: true },
       column_name: { type: 'string', description: 'The column to sample', required: true },
       limit: { type: 'number', description: 'Max values to return (default 20)' }
@@ -62,14 +66,15 @@ const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'run_query',
-    description: 'Execute a SELECT query against the database',
+    description: 'Execute a SELECT query against a database',
     parameters: {
+      database: { type: 'string', description: 'The database name', required: true },
       sql: { type: 'string', description: 'The SQL SELECT query to run', required: true }
     }
   },
   {
     name: 'final_answer',
-    description: 'Provide the final answer to the user after gathering enough information',
+    description: 'Provide the final answer to the user',
     parameters: {
       answer: { type: 'string', description: 'The complete answer with insights and context', required: true },
       sql_used: { type: 'string', description: 'The main SQL query that produced the answer' }
@@ -80,7 +85,7 @@ const AGENT_TOOLS: AgentTool[] = [
 export class AgentSqlService {
   private env: Env;
   private claude: ClaudeService;
-  private currentDatabase: string = 'Animal';
+  private cache: SchemaCache;
   private conversationContext?: {
     previousQuestion?: string;
     previousSql?: string;
@@ -90,6 +95,7 @@ export class AgentSqlService {
   constructor(env: Env) {
     this.env = env;
     this.claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+    this.cache = new SchemaCache(env);
   }
 
   private async callAzureFunction(endpoint: string, body: Record<string, unknown>): Promise<any> {
@@ -104,16 +110,28 @@ export class AgentSqlService {
     return response.json();
   }
 
-  private async listTables(): Promise<string> {
+  private async listDatabases(): Promise<string> {
+    // Return known databases - these are configured in the Azure Function
+    const databases = ['Animal', 'Logos'];
+    return `Available databases:\n- Animal: Animal shelter/control records\n- Logos: County ERP system (HR, Finance, Utility Billing)`;
+  }
+
+  private async listTables(database: string): Promise<string> {
+    // Check cache first
+    const cachedTables = await this.cache.getDatabaseTables(database);
+    if (cachedTables && cachedTables.length > 0) {
+      console.log(`Cache hit: ${database} tables (${cachedTables.length} tables)`);
+      return `Tables in ${database} database (from cache):\n${cachedTables.join('\n')}`;
+    }
+
+    // Fetch from Azure Function
     try {
-      console.log(`Agent: Fetching tables from schema endpoint for ${this.currentDatabase}...`);
-      
-      // Use AbortController for timeout
+      console.log(`Cache miss: Fetching ${database} tables from Azure Function...`);
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
       
       const response = await fetch(
-        `${this.env.AZURE_FUNCTION_URL}/api/schema?database=${this.currentDatabase}`,
+        `${this.env.AZURE_FUNCTION_URL}/api/schema?database=${database}`,
         { 
           headers: { 'x-api-key': this.env.AZURE_FUNCTION_KEY },
           signal: controller.signal
@@ -123,213 +141,112 @@ export class AgentSqlService {
       clearTimeout(timeoutId);
       
       if (!response.ok) {
-        console.error('Agent: Schema fetch failed:', response.status);
-        return this.getStaticTableList();
+        return `Error fetching tables: HTTP ${response.status}`;
       }
       
       const data = await response.json();
-      console.log('Agent: Schema response has tables:', data.tables?.length);
       
       if (!data.tables || data.tables.length === 0) {
-        return this.getStaticTableList();
+        return `No tables found in ${database} database`;
       }
       
       const tableList = data.tables.map((t: any) => 
-        `[${t.schema}].[${t.name}] - ${t.columns?.length || 0} columns`
-      ).join('\n');
+        `[${t.schema}].[${t.name}]`
+      );
       
-      return `Tables in ${this.currentDatabase} database:\n${tableList}`;
+      // Save to cache
+      await this.cache.setDatabaseTables(database, tableList);
+      
+      return `Tables in ${database} database:\n${tableList.join('\n')}`;
     } catch (e) {
-      console.error('Agent: Error in listTables, using static fallback:', e);
-      return this.getStaticTableList();
+      console.error('Error listing tables:', e);
+      return `Error listing tables: ${e}`;
     }
   }
 
-  private getStaticTableList(): string {
-    if (this.currentDatabase === 'Logos') {
-      return this.getLogosStaticTableList();
+  private async describeTable(database: string, tableName: string): Promise<string> {
+    const cleanTable = tableName.replace(/[\[\]]/g, '');
+    const schema = cleanTable.includes('.') ? cleanTable.split('.')[0] : 'dbo';
+    const name = cleanTable.includes('.') ? cleanTable.split('.')[1] : cleanTable;
+    
+    // Check cache first
+    const cachedSchema = await this.cache.getTableSchema(database, schema, name);
+    if (cachedSchema) {
+      console.log(`Cache hit: ${database}.${schema}.${name} schema`);
+      const columns = cachedSchema.columns.map(c => `  - [${c.name}] (${c.type})`).join('\n');
+      return `Table [${schema}].[${name}] in ${database} (from cache):\n${columns}`;
     }
-    return this.getAnimalStaticTableList();
-  }
 
-  private getLogosStaticTableList(): string {
-    return `Logos Database - Tyler Munis Government ERP
-
-=== SCHEMA ORGANIZATION ===
-| Schema | Purpose |
-| dbo | Core financial, AP, AR, purchasing, assets, projects |
-| HR | Human resources, payroll, benefits, employees |
-| UT | Utility management extensions |
-| FM | Financial management extensions |
-| MCD | Mobile code enforcement, inspections |
-
-=== GENERAL LEDGER (MOST IMPORTANT) ===
-
-**dbo.GLAccount** - Chart of accounts
-- GLAccountID (PK), GLAccountDelimitedFull (e.g., "110.3500 330.50")
-- Note: Account format has SPACE: "110.3500 330.50" not "110.3500.330.50"
-
-**dbo.JournalDetail** - ALL financial transactions (THE MAIN TABLE)
-- GLAccountID, FiscalEndYear, Amount, Source, Description, GLDate
-
-**CRITICAL: BUDGET vs EXPENSES (Source column)**
-BUDGET sources (exclude from expense calcs):
-- 'BudgetProcessing' - Original budget
-- 'BA YYYY-##' - Budget amendments
-- 'Budget' - Budget entries
-
-EXPENSE sources (actual spending):
-- 'Accounts Payable', 'Purchase Orders', 'JE-###', 'Payroll Post', etc.
-
-**Budget vs Actual Query Pattern:**
-SELECT 
-  SUM(CASE WHEN Source = 'BudgetProcessing' THEN Amount ELSE 0 END) as Budget,
-  SUM(CASE WHEN Source LIKE 'BA %' THEN Amount ELSE 0 END) as Amendments,
-  SUM(CASE WHEN Source NOT IN ('BudgetProcessing') AND Source NOT LIKE 'BA %' AND Source NOT LIKE 'Budget%' THEN Amount ELSE 0 END) as Expenses
-FROM dbo.JournalDetail WHERE GLAccountID = [id] AND FiscalEndYear = 2026
-
-Remaining Balance = Budget + Amendments - Expenses
-
-=== ACCOUNTS PAYABLE ===
-- dbo.Vendor (VendorID, VendorNumber, CentralNameID, ActiveFlag)
-- dbo.AccountsPayableInvoice (InvoiceID, VendorID, InvoiceNumber, InvoiceAmount, InvoiceDate)
-
-=== PURCHASING ===
-- dbo.PurchaseOrder (PurchaseOrderID, PONumber, VendorID, FiscalYear, ProcessStatus)
-- dbo.PurchaseOrderDetail (line items)
-
-=== HUMAN RESOURCES (HR schema) ===
-- HR.Employee (EmployeeId, EmployeeNumber, RecordStatus)
-- HR.EmployeeName (EmployeeId, FirstName, LastName, EffectiveEndDate)
-- HR.EmployeeJob (EmployeeId, Title, RateAmount, DepartmentId, IsPrimaryJob, EffectiveEndDate)
-
-**Active Employee Query:**
-SELECT e.EmployeeNumber, en.FirstName, en.LastName, ej.Title
-FROM HR.Employee e
-JOIN HR.EmployeeName en ON e.EmployeeId = en.EmployeeId
-JOIN HR.EmployeeJob ej ON e.EmployeeId = ej.EmployeeId
-WHERE e.RecordStatus = 1 AND en.EffectiveEndDate IS NULL AND ej.EffectiveEndDate IS NULL AND ej.IsPrimaryJob = 1
-
-=== UTILITY BILLING ===
-- dbo.UtilityCustomerAccount, dbo.UtilityAccount
-- dbo.UtilityTransactionHeader / UtilityTransactionDetail
-
-=== OTHER KEY TABLES ===
-- dbo.Permit - Building permits
-- MCD.Inspection - Inspections
-- dbo.Asset - Fixed assets
-- dbo.Grants - Grant tracking
-- dbo.Project - Project tracking
-- dbo.Receipt - Cash receipts
-- dbo.CentralName - Shared name/address table (LastName, FirstName, CentralNameID)
-
-=== CRITICAL NOTES ===
-1. ALWAYS filter by FiscalEndYear for balances
-2. ALWAYS separate Budget from Expenses using Source
-3. Check EffectiveEndDate IS NULL for current HR records
-4. Check ActiveFlag for master records
-5. Use CentralNameID to link names across modules`;
-  }
-
-  private getAnimalStaticTableList(): string {
-    return `Tables in Animal database:
-
-[dbo].[kennel] - Kennel records (animals that have been in the shelter)
-[dbo].[animal] - Animal master records
-[dbo].[person] - People (owners, contacts)
-[dbo].[tag] - Pet licenses/tags
-[dbo].[bite] - Bite incidents
-[dbo].[violation] - Code violations
-[dbo].[treatment] - Medical treatments
-[dbo].[animal_evaluation] - Behavior evaluations
-
-Other tables: animal_history, kennel_history, person_history, memo, receipt, todo, event, schedule
-
-KNOWN CODES (verified from this database):
-- outcome_type: 'EUTH' (euthanasia), 'ADOPTION', 'RTO' (return to owner), 'TRANSFER', 'DIED'
-- intake_type: 'STRAY', 'OWNED' (owner surrender), 'RESCUE'
-- location: 'SHELTER' (physical animals ~40-50), 'WEB' (web entries - exclude for physical counts)
-
-KEY QUERY PATTERNS:
-- Current animals: WHERE outcome_date IS NULL AND location = 'SHELTER'
-- Euthanasia counts: WHERE outcome_type = 'EUTH'
-- Adoptions: WHERE outcome_type = 'ADOPTION'
-
-Still explore with describe_table and sample_values to discover additional patterns.`;
-  }
-
-  private async describeTable(tableName: string): Promise<string> {
+    // Fetch by querying
     try {
-      const cleanTable = tableName.replace(/[\[\]]/g, '');
-      const name = cleanTable.includes('.') ? cleanTable.split('.')[1] : cleanTable;
-      
-      // Use SELECT TOP 0 to get column names without data - fast and reliable
-      const sql = `SELECT TOP 0 * FROM [${name}]`;
-      
-      const result = await this.callAzureFunction('query', { database: this.currentDatabase, query: sql });
+      console.log(`Cache miss: Describing ${database}.${schema}.${name}...`);
+      const sampleSql = `SELECT TOP 1 * FROM [${schema}].[${name}]`;
+      const result = await this.callAzureFunction('query', { database, query: sampleSql });
       
       if (result.error) {
-        // Try fallback: get one row and infer columns
-        const fallbackSql = `SELECT TOP 1 * FROM [${name}]`;
-        const fallbackResult = await this.callAzureFunction('query', { database: this.currentDatabase, query: fallbackSql });
-        
-        if (fallbackResult.error || !fallbackResult.rows?.length) {
-          return `Table [${name}] not found or query error: ${result.error || fallbackResult.error}`;
-        }
-        
-        const columns = Object.keys(fallbackResult.rows[0]).map(col => `  - [${col}]`).join('\n');
-        return `Table [dbo].[${name}]:\n${columns}`;
+        return `Error describing table: ${result.error}`;
       }
       
-      // For TOP 0, columns are in the metadata - but we need to get them differently
-      // Let's just get 1 row and extract column names
-      const sampleSql = `SELECT TOP 1 * FROM [${name}]`;
-      const sampleResult = await this.callAzureFunction('query', { database: this.currentDatabase, query: sampleSql });
-      
-      if (!sampleResult.rows?.length) {
-        return `Table [dbo].[${name}] exists but appears empty`;
+      if (!result.rows?.length) {
+        return `Table [${schema}].[${name}] exists but appears empty`;
       }
       
-      const columns = Object.keys(sampleResult.rows[0]).map(col => `  - [${col}]`).join('\n');
-      return `Table [dbo].[${name}]:\n${columns}`;
+      // Extract column info (we don't have types from this method, but names are useful)
+      const columns = Object.keys(result.rows[0]).map(col => ({ name: col, type: 'unknown' }));
+      
+      // Save to cache
+      await this.cache.setTableSchema(database, schema, name, columns);
+      
+      const columnList = columns.map(c => `  - [${c.name}]`).join('\n');
+      return `Table [${schema}].[${name}] in ${database}:\n${columnList}`;
     } catch (e) {
       return `Error describing table: ${e}`;
     }
   }
 
-  private async sampleValues(tableName: string, columnName: string, limit: number = 20): Promise<string> {
+  private async sampleValues(database: string, tableName: string, columnName: string, limit: number = 20): Promise<string> {
+    const cleanTable = tableName.replace(/[\[\]]/g, '');
+    const schema = cleanTable.includes('.') ? cleanTable.split('.')[0] : 'dbo';
+    const name = cleanTable.includes('.') ? cleanTable.split('.')[1] : cleanTable;
+    
+    // Check cache first
+    const cachedValues = await this.cache.getSampleValues(database, schema, name, columnName);
+    if (cachedValues) {
+      console.log(`Cache hit: ${database}.${schema}.${name}.${columnName} samples`);
+      return `Sample values for [${columnName}] in [${schema}].[${name}] (from cache):\n${cachedValues.join(', ')}`;
+    }
+
     try {
-      const cleanTable = tableName.replace(/[\[\]]/g, '');
-      const schema = cleanTable.includes('.') ? cleanTable.split('.')[0] : 'dbo';
-      const name = cleanTable.includes('.') ? cleanTable.split('.')[1] : cleanTable;
-      
+      console.log(`Cache miss: Sampling ${database}.${schema}.${name}.${columnName}...`);
       const sql = `SELECT TOP ${limit} DISTINCT [${columnName}] as val FROM [${schema}].[${name}] WHERE [${columnName}] IS NOT NULL ORDER BY [${columnName}]`;
       
-      const result = await this.callAzureFunction('query', { database: this.currentDatabase, query: sql });
+      const result = await this.callAzureFunction('query', { database, query: sql });
       
       if (result.error) return `Error: ${result.error}`;
       if (!result.rows?.length) return `No values found in ${tableName}.${columnName}`;
       
-      const values = result.rows.map((r: any) => r.val).join(', ');
-      return `Distinct values in [${columnName}]: ${values}`;
+      const values = result.rows.map((r: any) => String(r.val));
+      
+      // Save to cache
+      await this.cache.setSampleValues(database, schema, name, columnName, values);
+      
+      return `Sample values for [${columnName}] in [${schema}].[${name}]:\n${values.join(', ')}`;
     } catch (e) {
       return `Error sampling values: ${e}`;
     }
   }
 
-  private async runQuery(sql: string): Promise<string> {
+  private async runQuery(database: string, sql: string): Promise<string> {
     try {
-      // Ensure SELECT only
       if (!sql.trim().toUpperCase().startsWith('SELECT')) {
         return 'Error: Only SELECT queries are allowed';
       }
       
-      // Add TOP if missing
       if (!sql.toUpperCase().includes('TOP ')) {
         sql = sql.replace(/^SELECT\s+/i, `SELECT TOP ${MAX_ROWS} `);
       }
       
-      const result = await this.callAzureFunction('query', { database: this.currentDatabase, query: sql });
+      const result = await this.callAzureFunction('query', { database, query: sql });
       
       if (result.error) return `Query error: ${result.error}`;
       
@@ -337,7 +254,6 @@ Still explore with describe_table and sample_values to discover additional patte
         return `Query returned 0 rows.\nSQL: ${sql}`;
       }
       
-      // Format results
       const columns = Object.keys(result.rows[0]);
       const rows = result.rows.slice(0, 20).map((r: any) => 
         columns.map(c => `${c}: ${r[c]}`).join(', ')
@@ -351,18 +267,21 @@ Still explore with describe_table and sample_values to discover additional patte
 
   private async executeTool(tool: string, params: Record<string, unknown>): Promise<string> {
     switch (tool) {
+      case 'list_databases':
+        return this.listDatabases();
       case 'list_tables':
-        return this.listTables();
+        return this.listTables(params.database as string);
       case 'describe_table':
-        return this.describeTable(params.table_name as string);
+        return this.describeTable(params.database as string, params.table_name as string);
       case 'sample_values':
         return this.sampleValues(
+          params.database as string,
           params.table_name as string, 
           params.column_name as string,
           (params.limit as number) || 20
         );
       case 'run_query':
-        return this.runQuery(params.sql as string);
+        return this.runQuery(params.database as string, params.sql as string);
       default:
         return `Unknown tool: ${tool}`;
     }
@@ -387,91 +306,58 @@ Still explore with describe_table and sample_values to discover additional patte
     const today = new Date().toISOString().split('T')[0];
     const currentYear = new Date().getFullYear();
     
-    // Database-specific context
-    const databaseContext = this.currentDatabase === 'Logos' 
-      ? `DATABASE: Logos (Tyler Munis Government ERP - HR, Finance, Utility Billing)
+    // Build conversation context if we have it
+    let contextBlock = '';
+    if (this.conversationContext?.previousQuestion) {
+      contextBlock = `
+CONVERSATION CONTEXT:
+Previous question: "${this.conversationContext.previousQuestion}"
+${this.conversationContext.previousSql ? `Previous SQL used: ${this.conversationContext.previousSql}` : ''}
+${this.conversationContext.previousResponse ? `Previous answer summary: ${this.conversationContext.previousResponse.substring(0, 800)}...` : ''}
 
-CRITICAL RULE FOR BALANCE/BUDGET QUERIES:
-The dbo.JournalDetail table contains BOTH budget entries AND actual expenses in the same table.
-You MUST use the [Source] column to separate them:
-
-- Budget entries: Source = 'BudgetProcessing' or Source LIKE 'BA %'
-- Actual expenses: Source NOT IN ('BudgetProcessing') AND Source NOT LIKE 'BA %' AND Source NOT LIKE 'Budget%'
-
-*** NEVER just SUM(Amount) - this mixes budget with expenses and gives WRONG numbers! ***
-
-CORRECT pattern for "balance" or "remaining budget":
-SELECT 
-  SUM(CASE WHEN Source = 'BudgetProcessing' THEN Amount ELSE 0 END) as Budget,
-  SUM(CASE WHEN Source LIKE 'BA %' THEN Amount ELSE 0 END) as Amendments,  
-  SUM(CASE WHEN Source NOT IN ('BudgetProcessing') AND Source NOT LIKE 'BA %' AND Source NOT LIKE 'Budget%' THEN Amount ELSE 0 END) as Expenses,
-  SUM(CASE WHEN Source = 'BudgetProcessing' OR Source LIKE 'BA %' THEN Amount ELSE 0 END) -
-  SUM(CASE WHEN Source NOT IN ('BudgetProcessing') AND Source NOT LIKE 'BA %' AND Source NOT LIKE 'Budget%' THEN Amount ELSE 0 END) as RemainingBalance
-FROM dbo.JournalDetail WHERE GLAccountID = [id] AND FiscalEndYear = 2026
-
-KEY TABLES:
-- dbo.GLAccount: GLAccountID, GLAccountDelimitedFull (e.g., "110.4210 291.000")
-- dbo.JournalDetail: GLAccountID, FiscalEndYear, Amount, Source, GLDate
-- dbo.Vendor: VendorID, VendorNumber, CentralNameID
-- HR.Employee, HR.EmployeeName, HR.EmployeeJob: for employee data
-
-ALWAYS filter by FiscalEndYear for balance queries.`
-      : `DATABASE: Animal (Animal Shelter/Control data)
-Key tables: kennel, animal, person, tag, bite, violation, treatment
-Known codes: outcome_type (EUTH, ADOPTION, RTO, TRANSFER, DIED), location (SHELTER, WEB)`;
+This is a FOLLOW-UP question. The user is likely asking about the same subject (same table, same entity, same account).
+Look at the previous SQL to understand what entity/filter was used, and APPLY THE SAME FILTER to your new query.
+`;
+    }
     
-    return `You are a data analyst agent with access to a SQL database. Your job is to answer questions by exploring the database.
+    return `You are a data analyst with access to SQL databases. Answer questions by exploring the database structure and querying data.
 
 CURRENT DATE: ${today} (Year: ${currentYear})
-When users ask about "this year", "since January 1st", etc., use ${currentYear} as the year.
-
-${databaseContext}
+When users mention "this year", "since January", etc., use ${currentYear}.
 
 AVAILABLE TOOLS:
 ${toolDescriptions}
 
-CRITICAL GUIDELINES:
+HOW TO EXPLORE (like a data analyst would):
+1. If you don't know which database to use, call list_databases first
+2. Call list_tables to see what tables exist in a database
+3. Call describe_table to see columns in a table
+4. Call sample_values to understand what values exist in important columns (like status codes, types, categories)
+5. Once you understand the data, call run_query with a SQL query
+6. When you have the answer, call final_answer
 
-1. WHEN DOMAIN KNOWLEDGE PROVIDES THE PATTERN - USE IT DIRECTLY:
-   - If the database context above shows you exactly how to query something, USE THAT PATTERN
-   - Don't explore if you already know the answer approach
-   - For Logos budget/balance queries, USE the CASE WHEN pattern shown above
-
-2. FOR UNKNOWN QUESTIONS - EXPLORE:
-   - Use list_tables to see what's available
-   - Use describe_table to see columns
-   - Use sample_values to understand data patterns
-
-3. BE EFFICIENT:
-   - If you have the query pattern from domain knowledge, run it directly
-   - Don't waste iterations exploring when the answer is known
-   - Give final_answer as soon as you have good results
-
-${this.conversationContext?.previousQuestion ? `
-CONVERSATION CONTEXT (IMPORTANT):
-Previous question: "${this.conversationContext.previousQuestion}"
-${this.conversationContext.previousSql ? `Previous SQL: ${this.conversationContext.previousSql}` : ''}
-${this.conversationContext.previousResponse ? `Previous answer summary: ${this.conversationContext.previousResponse.substring(0, 500)}...` : ''}
-
-The user's current question is likely a FOLLOW-UP about the same subject (e.g., same GL account, same employee, same vendor).
-Extract key entities from the previous context and apply them to the current question!
-` : ''}
+TIPS:
+- Explore incrementally - don't guess column names, look them up first
+- Sample values help you understand codes and categories (e.g., what does "EUTH" mean in outcome_type?)
+- If a query returns unexpected results, investigate further before answering
+- For counts, consider if there are status/location columns that might filter active vs inactive records
+- The cache will remember what you discover, so future queries will be faster
+${contextBlock}
 USER QUESTION: ${question}
 
 ${stepHistory ? 'PREVIOUS STEPS:\n' + stepHistory + '\n\n' : ''}
-Now decide your next action. Respond in this exact JSON format:
+Respond with valid JSON:
 {
   "thought": "Your reasoning about what to do next",
   "tool": "tool_name",
   "parameters": { ... }
 }
 
-If you have enough information, use the final_answer tool.`;
+When ready to answer, use final_answer tool.`;
   }
 
   async queryWithAgent(
     question: string, 
-    database: string = 'Animal',
     onProgress?: ProgressCallback,
     context?: {
       previousQuestion?: string;
@@ -479,28 +365,23 @@ If you have enough information, use the final_answer tool.`;
       previousResponse?: string;
     }
   ): Promise<{ answer: string; steps: AgentStep[]; finalSql?: string }> {
-    this.currentDatabase = database;
     this.conversationContext = context;
-    console.log(`Agent starting exploration of ${database} database for question: ${question.substring(0, 50)}...`);
+    console.log(`Agent starting exploration for: ${question.substring(0, 50)}...`);
     
     const steps: AgentStep[] = [];
     let finalAnswer = '';
     let finalSql = '';
 
-    // Send initial progress
     await onProgress?.('Understanding your question...', 0, MAX_ITERATIONS);
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
-      // Add delay between iterations to avoid rate limiting
       if (i > 0) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
       
-      // Send thinking progress
       await onProgress?.(getProgressMessage('thinking', i), i + 1, MAX_ITERATIONS);
       
-      // Only keep last 5 steps to reduce prompt size
-      const recentSteps = steps.slice(-5);
+      const recentSteps = steps.slice(-6);
       const prompt = this.buildAgentPrompt(question, recentSteps);
       
       const response = await this.claude.chat(
@@ -509,10 +390,8 @@ If you have enough information, use the final_answer tool.`;
         { maxTokens: 1024, temperature: 0 }
       );
 
-      // Parse the JSON response
       let action: { thought: string; tool: string; parameters: Record<string, unknown> };
       try {
-        // Extract JSON from response (handle markdown code blocks)
         const jsonMatch = response.match(/\{[\s\S]*\}/);
         if (!jsonMatch) throw new Error('No JSON found');
         action = JSON.parse(jsonMatch[0]);
@@ -528,7 +407,6 @@ If you have enough information, use the final_answer tool.`;
         parameters: action.parameters,
       };
 
-      // Check if this is the final answer
       if (action.tool === 'final_answer') {
         await onProgress?.('Preparing your answer...', i + 1, MAX_ITERATIONS);
         finalAnswer = action.parameters.answer as string;
@@ -537,10 +415,8 @@ If you have enough information, use the final_answer tool.`;
         break;
       }
 
-      // Send progress update for the tool being executed
       await onProgress?.(getProgressMessage(action.tool, i), i + 1, MAX_ITERATIONS);
 
-      // Execute the tool
       const result = await this.executeTool(action.tool, action.parameters || {});
       step.result = result;
       steps.push(step);
@@ -548,19 +424,16 @@ If you have enough information, use the final_answer tool.`;
       console.log(`Agent step ${i + 1}: ${action.tool} -> ${result.substring(0, 100)}...`);
     }
 
-    // If we hit max iterations without final_answer, try to summarize what we found
     if (!finalAnswer) {
-      // Look for query results that might contain the answer
       const queryResults = steps
         .filter(s => s.tool === 'run_query' && s.result && !s.result.includes('error'))
         .map(s => s.result)
         .join('\n');
       
-      // If we have useful results, summarize them
-      if (queryResults.includes('cnt:') || queryResults.includes('count')) {
+      if (queryResults) {
         finalAnswer = 'Based on my database exploration, here is what I found:\n\n' +
           queryResults + '\n\n' +
-          'Note: I reached my exploration limit before formulating a complete answer, but the data above should help answer your question.';
+          'Note: I reached my exploration limit. The data above should help answer your question.';
       } else {
         finalAnswer = 'I explored the database but could not determine a complete answer. Here is what I found:\n\n' +
           steps.map(s => s.result).filter(Boolean).join('\n\n');

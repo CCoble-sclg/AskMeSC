@@ -11,6 +11,9 @@ export interface Env {
   // Workers AI (used for embeddings only)
   AI: Ai;
   
+  // KV namespace for schema cache (learned database knowledge)
+  SCHEMA_CACHE: KVNamespace;
+  
   // Anthropic Claude API key (used for LLM generation)
   ANTHROPIC_API_KEY: string;
   
