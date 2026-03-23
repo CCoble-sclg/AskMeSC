@@ -103,18 +103,30 @@ STEP 1: DETERMINE WHAT THE USER WANTS
 - Find the FIRST option/suggestion the chatbot offered (usually after "Would you like me to...")
 - Generate a query for THAT option
 
-STEP 2: MODIFY THE QUERY APPROPRIATELY
+STEP 2: MAINTAIN ENTITY CONTEXT (CRITICAL!)
+Look at the previous query. If it filters by a specific entity (GLAccountID, VendorID, EmployeeId, animal_id, etc.),
+KEEP THAT FILTER in the new query unless the user explicitly asks about something else!
+
+Example: If previous query had "WHERE GLAccountID = 1506", and user asks "what about January expenses",
+the new query MUST STILL include "WHERE GLAccountID = 1506" plus the January date filter.
+
+STEP 3: MODIFY THE QUERY APPROPRIATELY
 Based on what the user wants, you MUST change the query. DO NOT return the same query!
 
-COMMON MODIFICATIONS:
-- "dogs in hold/pending status" → CHANGE kennel_stat filter: WHERE k.[kennel_stat] IN ('STRAY WAIT', 'EVALUATION', 'UNAVAIL', 'HOLD')
-- "all animal types" or "cats too" → REMOVE the animal_type filter, or change to include CAT
+COMMON MODIFICATIONS (ANIMAL DATABASE):
+- "dogs in hold/pending status" → CHANGE kennel_stat filter
+- "all animal types" or "cats too" → REMOVE the animal_type filter
 - "break down by type" → Add GROUP BY a.[animal_type]
 - "euthanasia numbers" → Change to WHERE k.[outcome_type] = 'EUTH' and COUNT(*)
-- "trends over time" → Add GROUP BY with date formatting
+
+COMMON MODIFICATIONS (LOGOS/FINANCE DATABASE):
+- "for January" or "for [month]" → Add date filter but KEEP the GLAccountID filter!
+- "last 5 years" → Change FiscalEndYear to BETWEEN (currentYear-4) AND currentYear, GROUP BY FiscalEndYear
+- "break down by month" → Add GROUP BY FORMAT(GLDate, 'yyyy-MM')
+- "show details" → Change from SUM() to SELECT individual transaction rows
 
 IMPORTANT: The query MUST be DIFFERENT from the previous query!
-If the user said "yes" to see something different, returning the same query is WRONG.
+Keep entity filters (GLAccountID, VendorID, etc.) unless user asks about a different entity.
 
 ALWAYS output a valid SELECT query starting with "SELECT".
 
