@@ -384,8 +384,33 @@ Still explore with describe_table and sample_values to discover additional patte
     
     // Database-specific context
     const databaseContext = this.currentDatabase === 'Logos' 
-      ? `DATABASE: Logos (ERP System - contains HR, Finance, and Utility Billing data)
-This is a business/financial database. Explore tables to discover the schema.`
+      ? `DATABASE: Logos (Tyler Munis Government ERP - HR, Finance, Utility Billing)
+
+CRITICAL RULE FOR BALANCE/BUDGET QUERIES:
+The dbo.JournalDetail table contains BOTH budget entries AND actual expenses in the same table.
+You MUST use the [Source] column to separate them:
+
+- Budget entries: Source = 'BudgetProcessing' or Source LIKE 'BA %'
+- Actual expenses: Source NOT IN ('BudgetProcessing') AND Source NOT LIKE 'BA %' AND Source NOT LIKE 'Budget%'
+
+*** NEVER just SUM(Amount) - this mixes budget with expenses and gives WRONG numbers! ***
+
+CORRECT pattern for "balance" or "remaining budget":
+SELECT 
+  SUM(CASE WHEN Source = 'BudgetProcessing' THEN Amount ELSE 0 END) as Budget,
+  SUM(CASE WHEN Source LIKE 'BA %' THEN Amount ELSE 0 END) as Amendments,  
+  SUM(CASE WHEN Source NOT IN ('BudgetProcessing') AND Source NOT LIKE 'BA %' AND Source NOT LIKE 'Budget%' THEN Amount ELSE 0 END) as Expenses,
+  SUM(CASE WHEN Source = 'BudgetProcessing' OR Source LIKE 'BA %' THEN Amount ELSE 0 END) -
+  SUM(CASE WHEN Source NOT IN ('BudgetProcessing') AND Source NOT LIKE 'BA %' AND Source NOT LIKE 'Budget%' THEN Amount ELSE 0 END) as RemainingBalance
+FROM dbo.JournalDetail WHERE GLAccountID = [id] AND FiscalEndYear = 2026
+
+KEY TABLES:
+- dbo.GLAccount: GLAccountID, GLAccountDelimitedFull (e.g., "110.4210 291.000")
+- dbo.JournalDetail: GLAccountID, FiscalEndYear, Amount, Source, GLDate
+- dbo.Vendor: VendorID, VendorNumber, CentralNameID
+- HR.Employee, HR.EmployeeName, HR.EmployeeJob: for employee data
+
+ALWAYS filter by FiscalEndYear for balance queries.`
       : `DATABASE: Animal (Animal Shelter/Control data)
 Key tables: kennel, animal, person, tag, bite, violation, treatment
 Known codes: outcome_type (EUTH, ADOPTION, RTO, TRANSFER, DIED), location (SHELTER, WEB)`;
@@ -400,26 +425,22 @@ ${databaseContext}
 AVAILABLE TOOLS:
 ${toolDescriptions}
 
-CRITICAL GUIDELINES - EXPLORE LIKE A DATA ANALYST:
+CRITICAL GUIDELINES:
 
-1. UNDERSTAND THE TABLE STRUCTURE:
+1. WHEN DOMAIN KNOWLEDGE PROVIDES THE PATTERN - USE IT DIRECTLY:
+   - If the database context above shows you exactly how to query something, USE THAT PATTERN
+   - Don't explore if you already know the answer approach
+   - For Logos budget/balance queries, USE the CASE WHEN pattern shown above
+
+2. FOR UNKNOWN QUESTIONS - EXPLORE:
    - Use list_tables to see what's available
-   - Use describe_table to see all columns in a table
-   - Look for columns that might filter data: status, type, location, category columns
+   - Use describe_table to see columns
+   - Use sample_values to understand data patterns
 
-2. FOR COUNT QUESTIONS - ALWAYS CHECK THESE COLUMN TYPES:
-   - 'location' columns - might distinguish physical vs virtual/web records
-   - 'status' or 'stat' columns - might indicate active vs inactive
-   - 'type' columns - might categorize records
-   - Date columns - NULL might mean current/active
-   
-   RUN GROUP BY queries on these columns to see the distribution BEFORE giving a final count!
-
-3. SANITY CHECK YOUR RESULTS:
-   - If a count is unexpectedly large or small, investigate what's included
-   - Group by relevant columns to see the breakdown
-
-4. When confident in your understanding, use final_answer with a clear response
+3. BE EFFICIENT:
+   - If you have the query pattern from domain knowledge, run it directly
+   - Don't waste iterations exploring when the answer is known
+   - Give final_answer as soon as you have good results
 
 USER QUESTION: ${question}
 
