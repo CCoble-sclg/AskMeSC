@@ -1,7 +1,7 @@
 import type { Env, QueryResult } from '../types';
 import { ClaudeService } from './claude';
 
-const MAX_ITERATIONS = 12;
+const MAX_ITERATIONS = 20;
 const MAX_ROWS = 50;
 
 interface AgentTool {
