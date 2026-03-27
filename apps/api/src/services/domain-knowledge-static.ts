@@ -128,9 +128,26 @@ FROM dbo.JournalDetail WHERE GLAccountID = X AND FiscalEndYear = 2026
 |--------|-------------|
 | EmployeeId | FK to Employee |
 | Title | Job title |
-| DepartmentId | FK to OrgStructure |
+| DepartmentID | FK to dbo.OrgStructure.OrgStructureID |
 | IsPrimaryJob | 1 = primary position |
-| EffectiveEndDate | NULL = current |
+| EffectiveEndDate | 9999-12-31 = current |
+
+### dbo.OrgStructure (Department Structure)
+| Column | Description |
+|--------|-------------|
+| OrgStructureID | Primary key (matches HR.EmployeeJob.DepartmentID) |
+| Level1ID | FK to dbo.OrgGroup.OrgGroupID (this is the DEPARTMENT level) |
+
+### dbo.OrgGroup (Department Names)
+| Column | Description |
+|--------|-------------|
+| OrgGroupID | Primary key |
+| OrgGroupCodeDesc | Department name (e.g., "Elections", "Finance", "Public Works (Operating)") |
+
+## CRITICAL: Getting Department Name for Employees
+
+To get department names, you MUST join through OrgStructure to OrgGroup:
+  HR.EmployeeJob.DepartmentID -> dbo.OrgStructure.OrgStructureID -> dbo.OrgGroup via OrgStructure.Level1ID = OrgGroup.OrgGroupID
 
 ## Key HR Queries
 
@@ -138,18 +155,18 @@ Active employee count:
 SELECT COUNT(DISTINCT EmployeeId) FROM HR.EmployeeEmployment
 WHERE vsEmploymentStatusId = 518 AND EffectiveEndDate = '9999-12-31'
 
-Employees hired since date:
-SELECT en.FirstName, en.LastName, ee.EffectiveDate as HireDate, ej.Title
+Employees hired since date (with department):
+SELECT en.FirstName, en.LastName, ee.EffectiveDate as HireDate, ej.Title, og.OrgGroupCodeDesc as Department
 FROM HR.EmployeeEmployment ee
 JOIN HR.Employee e ON ee.EmployeeId = e.EmployeeId
 JOIN HR.EmployeeName en ON e.EmployeeId = en.EmployeeId
 JOIN HR.EmployeeJob ej ON e.EmployeeId = ej.EmployeeId
+INNER JOIN dbo.OrgStructure os ON ej.DepartmentID = os.OrgStructureID
+INNER JOIN dbo.OrgGroup og ON os.Level1ID = og.OrgGroupID
 WHERE ee.EffectiveDate >= '2026-01-01' AND ee.vsEmploymentStatusId = 518
   AND ee.EffectiveEndDate = '9999-12-31'
   AND en.EffectiveEndDate = '9999-12-31'
   AND ej.EffectiveEndDate = '9999-12-31' AND ej.IsPrimaryJob = 1
-
-NOTE: dbo.OrgStructure does NOT have a Description/Name column. Do NOT join to it. Use ej.Title for job info instead.
 
 ## Other Tables
 
