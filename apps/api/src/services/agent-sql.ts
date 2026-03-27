@@ -128,7 +128,7 @@ If the user asks "what were they", "list them", "show details", etc., query for 
     // Step 1: Generate SQL (ONE LLM call)
     await onProgress?.('Generating query...', 1, 3);
     
-    const sqlPrompt = `You are a SQL expert. Generate a SQL query to answer the user's question.
+    const sqlPrompt = `Generate a T-SQL query to answer this question.
 
 CURRENT DATE: ${today} (Year: ${currentYear})
 
@@ -142,27 +142,31 @@ ${LOGOS_DB_KNOWLEDGE}
 ${contextBlock}
 USER QUESTION: ${question}
 
-Respond with ONLY valid JSON (no markdown, no explanation):
-{"database": "Animal" or "Logos", "sql": "SELECT ..."}`;
+Respond with ONLY this JSON format, nothing else:
+{"database": "Animal", "sql": "SELECT ..."}
+or
+{"database": "Logos", "sql": "SELECT ..."}`;
 
     const sqlResponse = await this.claude.chat(
-      'You are a SQL expert. Respond with ONLY valid JSON.',
+      'You are a T-SQL expert for Microsoft SQL Server. You respond with ONLY a JSON object containing "database" and "sql" keys. No markdown, no explanation, no code fences.',
       sqlPrompt,
-      { maxTokens: 500, temperature: 0 }
+      { maxTokens: 1000, temperature: 0 }
     );
 
     let database: string;
     let sql: string;
     
     try {
-      const jsonMatch = sqlResponse.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('No JSON found');
+      const cleaned = sqlResponse.replace(/```json?\s*/gi, '').replace(/```/g, '').trim();
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('No JSON found in response');
       const parsed = JSON.parse(jsonMatch[0]);
       database = parsed.database;
       sql = parsed.sql;
+      if (!database || !sql) throw new Error('Missing database or sql in response');
     } catch (e) {
       console.error('Failed to parse SQL response:', sqlResponse);
-      throw new Error('Failed to generate SQL query');
+      throw new Error(`Failed to generate SQL query: ${e instanceof Error ? e.message : e}`);
     }
 
     console.log(`Direct query - DB: ${database}, SQL: ${sql}`);
