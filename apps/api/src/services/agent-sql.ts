@@ -150,7 +150,7 @@ or
     const sqlResponse = await this.claude.chat(
       'You are a T-SQL expert for Microsoft SQL Server. You ONLY output valid JSON. No explanation, no markdown, no code fences. Just a single JSON object.',
       sqlPrompt,
-      { maxTokens: 1000, temperature: 0 }
+      { maxTokens: 4096, temperature: 0 }
     );
 
     let database: string;
