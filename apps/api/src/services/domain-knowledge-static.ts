@@ -131,6 +131,17 @@ FROM dbo.JournalDetail WHERE GLAccountID = X AND FiscalEndYear = 2026
 | DepartmentID | FK to dbo.OrgStructure.OrgStructureID |
 | IsPrimaryJob | 1 = primary position |
 | EffectiveEndDate | 9999-12-31 = current |
+NOTE: EmployeeJob does NOT have salary columns. Use the salary function below.
+
+### HR.fn_GetEmployee_Base_ProjectedSalary_ByDate (Table-Valued Function for Salary)
+Call as: HR.fn_GetEmployee_Base_ProjectedSalary_ByDate(GETDATE(), NULL)
+| Column | Description |
+|--------|-------------|
+| EmployeeId | FK to Employee |
+| HourlyRate | Hourly pay rate |
+| ProjectedAnnualSalary | Annual salary |
+LEFT JOIN like a table:
+LEFT JOIN HR.fn_GetEmployee_Base_ProjectedSalary_ByDate(GETDATE(), NULL) ePay ON ePay.EmployeeId = e.EmployeeId
 
 ### dbo.OrgStructure (Department Structure)
 | Column | Description |
@@ -173,6 +184,20 @@ INNER JOIN dbo.OrgStructure os ON ej.DepartmentID = os.OrgStructureID
 INNER JOIN dbo.OrgGroup og ON os.Level1ID = og.OrgGroupID
 WHERE ee.EffectiveDate >= '2026-01-01' AND ee.vsEmploymentStatusId = 518
   AND ee.EffectiveEndDate = '9999-12-31'
+  AND en.EffectiveEndDate = '9999-12-31'
+  AND ej.EffectiveEndDate = '9999-12-31' AND ej.IsPrimaryJob = 1
+
+Employees with salary (with department):
+SELECT en.FirstName, en.LastName, ej.Title, og.OrgGroupCodeDesc as Department,
+  ePay.HourlyRate, ePay.ProjectedAnnualSalary as [Annual Salary]
+FROM HR.Employee e
+JOIN HR.EmployeeEmployment ee ON e.EmployeeId = ee.EmployeeId
+JOIN HR.EmployeeName en ON e.EmployeeId = en.EmployeeId
+JOIN HR.EmployeeJob ej ON e.EmployeeId = ej.EmployeeId
+INNER JOIN dbo.OrgStructure os ON ej.DepartmentID = os.OrgStructureID
+INNER JOIN dbo.OrgGroup og ON os.Level1ID = og.OrgGroupID
+LEFT JOIN HR.fn_GetEmployee_Base_ProjectedSalary_ByDate(GETDATE(), NULL) ePay ON ePay.EmployeeId = e.EmployeeId
+WHERE ee.vsEmploymentStatusId = 518 AND ee.EffectiveEndDate = '9999-12-31'
   AND en.EffectiveEndDate = '9999-12-31'
   AND ej.EffectiveEndDate = '9999-12-31' AND ej.IsPrimaryJob = 1
 
