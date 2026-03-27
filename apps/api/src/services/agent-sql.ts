@@ -147,12 +147,9 @@ Respond with ONLY this JSON format, nothing else:
 or
 {"database": "Logos", "sql": "SELECT ..."}`;
 
-    const sqlResponse = await this.claude.chatMultiTurn(
-      'You are a T-SQL expert for Microsoft SQL Server. You ONLY output JSON. Never explain, never use markdown.',
-      [
-        { role: 'user', content: sqlPrompt },
-        { role: 'assistant', content: '{"database":' },
-      ],
+    const sqlResponse = await this.claude.chat(
+      'You are a T-SQL expert for Microsoft SQL Server. You ONLY output valid JSON. No explanation, no markdown, no code fences. Just a single JSON object.',
+      sqlPrompt,
       { maxTokens: 1000, temperature: 0 }
     );
 
@@ -160,8 +157,7 @@ or
     let sql: string;
     
     try {
-      const fullJson = '{"database":' + sqlResponse;
-      const cleaned = fullJson.replace(/```json?\s*/gi, '').replace(/```/g, '').trim();
+      const cleaned = sqlResponse.replace(/```json?\s*/gi, '').replace(/```/g, '').trim();
       const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('No JSON found');
       const parsed = JSON.parse(jsonMatch[0]);

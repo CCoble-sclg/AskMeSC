@@ -8,12 +8,6 @@
   let input = $state('');
   let textarea: HTMLTextAreaElement;
 
-  $effect(() => {
-    if (!disabled && textarea) {
-      textarea.focus();
-    }
-  });
-
   const handleSubmit = () => {
     if (input.trim() && !disabled) {
       onSend(input.trim());
@@ -60,7 +54,7 @@
         onclick={onClear}
         title="Clear conversation"
       >
-        🗑️
+        Clear
       </button>
       
       <button 
