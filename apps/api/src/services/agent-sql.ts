@@ -147,9 +147,12 @@ Respond with ONLY this JSON format, nothing else:
 or
 {"database": "Logos", "sql": "SELECT ..."}`;
 
-    const sqlResponse = await this.claude.chat(
-      'You are a T-SQL expert for Microsoft SQL Server. You respond with ONLY a JSON object containing "database" and "sql" keys. No markdown, no explanation, no code fences.',
-      sqlPrompt,
+    const sqlResponse = await this.claude.chatMultiTurn(
+      'You are a T-SQL expert for Microsoft SQL Server. You ONLY output JSON. Never explain, never use markdown.',
+      [
+        { role: 'user', content: sqlPrompt },
+        { role: 'assistant', content: '{"database":' },
+      ],
       { maxTokens: 1000, temperature: 0 }
     );
 
@@ -157,16 +160,18 @@ or
     let sql: string;
     
     try {
-      const cleaned = sqlResponse.replace(/```json?\s*/gi, '').replace(/```/g, '').trim();
+      const fullJson = '{"database":' + sqlResponse;
+      const cleaned = fullJson.replace(/```json?\s*/gi, '').replace(/```/g, '').trim();
       const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('No JSON found in response');
+      if (!jsonMatch) throw new Error('No JSON found');
       const parsed = JSON.parse(jsonMatch[0]);
       database = parsed.database;
       sql = parsed.sql;
-      if (!database || !sql) throw new Error('Missing database or sql in response');
+      if (!database || !sql) throw new Error('Missing database or sql');
     } catch (e) {
       console.error('Failed to parse SQL response:', sqlResponse);
-      throw new Error(`Failed to generate SQL query: ${e instanceof Error ? e.message : e}`);
+      const preview = sqlResponse.substring(0, 200);
+      throw new Error(`Failed to generate SQL query. LLM returned: ${preview}`);
     }
 
     console.log(`Direct query - DB: ${database}, SQL: ${sql}`);
