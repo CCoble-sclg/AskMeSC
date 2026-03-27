@@ -37,3 +37,7 @@ sync/*.log
 
 # Cloudflare
 .mf/
+
+# Temporary/generated files
+logos_tables*.json
+apps/api/tail_output.txt

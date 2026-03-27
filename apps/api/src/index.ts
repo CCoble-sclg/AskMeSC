@@ -10,10 +10,15 @@ const app = new Hono<{ Bindings: Env }>();
 // CORS for the frontend
 app.use('*', cors({
   origin: (origin) => {
-    if (!origin) return 'https://askmesc.pages.dev';
-    if (origin === 'http://localhost:5173') return origin;
-    if (origin.endsWith('.askmesc.pages.dev') || origin === 'https://askmesc.pages.dev') return origin;
-    return 'https://askmesc.pages.dev';
+    if (!origin) return 'https://askmesc.stanlycountync.gov';
+    const allowed = [
+      'https://askmesc.stanlycountync.gov',
+      'https://askmesc.pages.dev',
+      'http://localhost:5173',
+    ];
+    if (allowed.includes(origin)) return origin;
+    if (origin.endsWith('.askmesc.pages.dev')) return origin;
+    return 'https://askmesc.stanlycountync.gov';
   },
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Sync-API-Key'],

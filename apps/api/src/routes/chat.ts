@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { Env, ChatRequest, ChatResponse, Source } from '../types';
 import { AgentSqlService, type ProgressCallback } from '../services/agent-sql';
-import { RagService } from '../services/rag';
 import { RateLimitError } from '../services/claude';
 import { SchemaCache } from '../services/schema-cache';
 
@@ -26,23 +25,7 @@ chatRoutes.post('/clear-cache', async (c) => {
   }
 });
 
-// Simple check if this looks like a document/policy question
-function isDocumentQuestion(question: string): boolean {
-  const lowerQuestion = question.toLowerCase();
-  const documentKeywords = [
-    'policy', 'policies', 'procedure', 'procedures', 'handbook', 'manual',
-    'guideline', 'regulation', 'ordinance', 'bylaw', 'contract', 'agreement'
-  ];
-  
-  // Only use document search if explicitly asking about policies/documents
-  // and NOT asking for counts/data
-  const hasDocKeyword = documentKeywords.some(k => lowerQuestion.includes(k));
-  const hasDataKeyword = /how many|count|total|list|show|find|what (is|are|were)|between/i.test(lowerQuestion);
-  
-  return hasDocKeyword && !hasDataKeyword;
-}
-
-// Main chat endpoint - always uses agent for SQL, RAG for documents
+// Main chat endpoint
 chatRoutes.post('/', async (c) => {
   const body = await c.req.json<ChatRequest>();
   
@@ -62,27 +45,12 @@ chatRoutes.post('/', async (c) => {
   const conversationId = body.conversationId || crypto.randomUUID();
   
   try {
-    // Check if this is a document question
-    if (isDocumentQuestion(message)) {
-      console.log('Using document search (RAG) for policy question');
-      const rag = new RagService(c.env);
-      const { response, sources } = await rag.query(message);
-
-      return c.json({
-        response,
-        sources,
-        conversationId,
-        lastQuestion: message,
-      });
-    }
-    
-    // Use agent for all data questions
-    console.log('Using agent for database exploration...');
+    console.log('Using direct query mode...');
     const agentService = new AgentSqlService(c.env);
     
-    const { answer, steps, finalSql } = await agentService.queryWithAgent(
+    const { answer, sql } = await agentService.queryDirect(
       message,
-      undefined, // no progress callback for non-streaming
+      undefined,
       body.previousQuestion ? {
         previousQuestion: body.previousQuestion,
         previousSql: body.previousSql,
@@ -90,18 +58,18 @@ chatRoutes.post('/', async (c) => {
       } : undefined
     );
     
-    console.log(`Agent completed with ${steps.length} steps`);
+    console.log('Direct query completed');
     
     const response: ChatResponse = {
       response: answer,
       sources: [{
-        table: 'Agent Analysis',
-        id: 'agent',
-        snippet: finalSql || `Explored database in ${steps.length} steps`,
+        table: 'Direct Query',
+        id: 'direct',
+        snippet: sql,
         score: 0.9,
       }],
       conversationId,
-      lastSql: finalSql,
+      lastSql: sql,
       lastQuestion: message,
       lastResponse: answer,
     };
@@ -142,7 +110,7 @@ chatRoutes.post('/stream', async (c) => {
         });
       };
 
-      const { answer, steps, finalSql } = await agentService.queryWithAgent(
+      const { answer, sql } = await agentService.queryDirect(
         message,
         onProgress,
         body.previousQuestion ? {
@@ -155,13 +123,13 @@ chatRoutes.post('/stream', async (c) => {
       const response: ChatResponse = {
         response: answer,
         sources: [{
-          table: 'Agent Analysis',
-          id: 'agent',
-          snippet: finalSql || `Explored database in ${steps.length} steps`,
+          table: 'Direct Query',
+          id: 'direct',
+          snippet: sql,
           score: 0.9,
         }],
         conversationId,
-        lastSql: finalSql,
+        lastSql: sql,
         lastQuestion: message,
         lastResponse: answer,
       };

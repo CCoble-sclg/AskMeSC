@@ -1,8 +1,9 @@
 import type { Env } from '../types';
 import { ClaudeService } from './claude';
 import { SchemaCache } from './schema-cache';
+import { ANIMAL_DB_KNOWLEDGE, LOGOS_DB_KNOWLEDGE } from './domain-knowledge-static';
 
-const MAX_ITERATIONS = 40;
+const MAX_ITERATIONS = 10;
 const MAX_ROWS = 50;
 
 const PROGRESS_MESSAGES: Record<string, string[]> = {
@@ -98,6 +99,122 @@ export class AgentSqlService {
     this.cache = new SchemaCache(env);
   }
 
+  /**
+   * Direct query mode - 2 LLM calls total:
+   * 1. Generate SQL from question + domain knowledge
+   * 2. Format answer from results
+   */
+  async queryDirect(
+    question: string,
+    onProgress?: ProgressCallback,
+    context?: { previousQuestion?: string; previousSql?: string; previousResponse?: string }
+  ): Promise<{ answer: string; sql: string }> {
+    const today = new Date().toISOString().split('T')[0];
+    const currentYear = new Date().getFullYear();
+
+    let contextBlock = '';
+    if (context?.previousQuestion) {
+      contextBlock = `
+PREVIOUS CONTEXT:
+- Previous question: "${context.previousQuestion}"
+- Previous SQL: ${context.previousSql || 'N/A'}
+- Previous answer: ${context.previousResponse?.substring(0, 500) || 'N/A'}
+
+This is a FOLLOW-UP question. Use the same database and base filters from the previous SQL.
+If the user asks "what were they", "list them", "show details", etc., query for INDIVIDUAL ROWS with detail columns (Date, Description, Amount, etc.) instead of aggregates.
+`;
+    }
+
+    // Step 1: Generate SQL (ONE LLM call)
+    await onProgress?.('Generating query...', 1, 3);
+    
+    const sqlPrompt = `You are a SQL expert. Generate a SQL query to answer the user's question.
+
+CURRENT DATE: ${today} (Year: ${currentYear})
+
+DOMAIN KNOWLEDGE:
+
+=== ANIMAL DATABASE (use for shelter/animal questions) ===
+${ANIMAL_DB_KNOWLEDGE}
+
+=== LOGOS DATABASE (use for finance/HR/employee questions) ===
+${LOGOS_DB_KNOWLEDGE}
+${contextBlock}
+USER QUESTION: ${question}
+
+Respond with ONLY valid JSON (no markdown, no explanation):
+{"database": "Animal" or "Logos", "sql": "SELECT ..."}`;
+
+    const sqlResponse = await this.claude.chat(
+      'You are a SQL expert. Respond with ONLY valid JSON.',
+      sqlPrompt,
+      { maxTokens: 500, temperature: 0 }
+    );
+
+    let database: string;
+    let sql: string;
+    
+    try {
+      const jsonMatch = sqlResponse.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('No JSON found');
+      const parsed = JSON.parse(jsonMatch[0]);
+      database = parsed.database;
+      sql = parsed.sql;
+    } catch (e) {
+      console.error('Failed to parse SQL response:', sqlResponse);
+      throw new Error('Failed to generate SQL query');
+    }
+
+    console.log(`Direct query - DB: ${database}, SQL: ${sql}`);
+
+    // Step 2: Run the query
+    await onProgress?.('Running query...', 2, 3);
+    
+    const result = await this.callAzureFunction('query', { database, query: sql });
+    
+    console.log('Query result:', JSON.stringify(result).substring(0, 500));
+    
+    if (result.error) {
+      const details = result.details ? ` - ${result.details}` : '';
+      throw new Error(`Query failed (${database}): ${result.error}${details} | SQL: ${sql}`);
+    }
+
+    const rows = result.rows || [];
+    const resultText = rows.length === 0 
+      ? 'No results found.'
+      : rows.slice(0, MAX_ROWS).map((r: Record<string, unknown>) => 
+          Object.entries(r).map(([k, v]) => `${k}: ${v}`).join(', ')
+        ).join('\n');
+
+    // Step 3: Format answer (ONE LLM call)
+    await onProgress?.('Formatting answer...', 3, 3);
+
+    const answerPrompt = `Based on the query results, provide a complete answer to the user's question.
+
+USER QUESTION: ${question}
+
+SQL USED: ${sql}
+
+QUERY RESULTS (${rows.length} rows):
+${resultText}
+
+FORMATTING RULES:
+- If there are multiple rows, display them in a markdown table
+- Include ALL rows in your response - do not truncate or summarize
+- Format currency values with $ and commas (e.g., $1,234.56)
+- Format dates as readable (e.g., Jan 15, 2026)
+- Start with a brief summary sentence, then show the data
+- Be specific with numbers and names`;
+
+    const answer = await this.claude.chat(
+      'You are a helpful assistant. Provide complete, well-formatted answers based on data.',
+      answerPrompt,
+      { maxTokens: 2000, temperature: 0 }
+    );
+
+    return { answer, sql };
+  }
+
   private async callAzureFunction(endpoint: string, body: Record<string, unknown>): Promise<any> {
     const response = await fetch(`${this.env.AZURE_FUNCTION_URL}/api/${endpoint}`, {
       method: 'POST',
@@ -113,16 +230,57 @@ export class AgentSqlService {
   private async listDatabases(): Promise<string> {
     return `Available databases:
 
-1. Animal - Animal shelter/kennel management system
-   - KEY TABLE: [dbo].[kennel] - Current animal assignments. Use outcome_date IS NULL for animals currently in shelter.
-   - Other tables: animal (master records - often stale), person, tag, bite, violation, treatment
-   - IMPORTANT: To count animals CURRENTLY in shelter, use: SELECT COUNT(*) FROM kennel WHERE outcome_date IS NULL AND location = 'SHELTER'
-   - The 'animal' table has stale status data - prefer 'kennel' table for current counts
+1. Animal - Animal shelter operations and adoptions tracking
+   - Tables are in dbo schema (standard): [dbo].[kennel], [dbo].[animal], etc.
+   - PRIMARY USE: Tracking shelter animals, intakes, outcomes (adoptions, transfers, euthanasia)
+   - KEY TABLE: [dbo].[kennel] - All shelter transactions (intakes, outcomes, current animals)
+   - Supporting tables: [dbo].[animal] (animal details), [dbo].[person] (owners/adopters)
+   
+   CRITICAL FOR CURRENT SHELTER COUNTS:
+   - DO NOT just use 'outcome_date IS NULL' - that includes ~13,000 LOST/FOUND reports!
+   - CORRECT: WHERE outcome_date IS NULL AND kennel_no NOT IN ('LOST', 'FOUND')
+   - kennel_no values 'LOST' and 'FOUND' are tracking records, not physical animals in shelter
+   
+   KEY CODE VALUES:
+   - outcome_type: ADOPTION, EUTH (euthanasia), DIED, RTO (return to owner), TRANSFER, FOSTER
+   - animal_type: DOG, CAT, BIRD, LIVESTOCK, OTHER
+   - kennel_stat: AVAILABLE, STRAY WAIT, EVALUATION, UNAVAIL
 
 2. Logos - County ERP system (Tyler Technologies Munis)
-   - KEY TABLE: [dbo].[JournalDetail] - All financial transactions. Use Source column to distinguish budget vs expenses.
-   - Other tables: GLAccount, Vendor, PurchaseOrder, HR.Employee, UtilityAccount
-   - IMPORTANT: For budget queries, Source='BudgetProcessing' is budget, other sources are expenses`;
+   - Tables are in dbo schema (main) and HR schema (employees)
+   - SCHEMAS NOT USED: CD (Community Development) - ignore these tables
+   
+   KEY FINANCIAL TABLES:
+   - [dbo].[JournalDetail] - ALL financial transactions (budget, expenses, revenue)
+   - [dbo].[GLAccount] - GL account master (join on GLAccountID)
+   - [dbo].[Account] - Account code definitions (AccountType: 1=Asset, 2=Liability, 3=Fund Balance, 4=Revenue, 5=Expense)
+   - [dbo].[Organization1] - Funds (OrganizationCode = fund number like '110' for General Fund)
+   - [dbo].[Vendor] - Vendor master
+   - [dbo].[PurchaseOrder] - Purchase orders
+   
+   HR TABLES (for employee counts):
+   - [HR].[EmployeeEmployment] - BEST TABLE for current employee status
+   - Active employees: WHERE vsEmploymentStatusId = 518 AND EffectiveEndDate = '9999-12-31'
+   - Status codes: 518=Active, 519=Terminated, 517=Leave, 520=Retired
+   - [HR].[Employee] - Employee master (links via EmployeeId)
+   - [HR].[EmployeeName] - Names (use EffectiveEndDate = '9999-12-31' for current)
+   - [HR].[EmployeeJob] - Job/position info
+   
+   UTILITY BILLING:
+   - [dbo].[UtilityAccount] - Customer accounts (AccountStatus: 1=Active, 2=Inactive)
+   - [dbo].[UtilityBill], [dbo].[UtilityCustomerAccount]
+   
+   CRITICAL - BUDGET VS EXPENSES (Source column in JournalDetail):
+   - Source = 'BudgetProcessing' → BUDGET entries
+   - Source = 'BA YYYY-##' → Budget amendments
+   - All other Source values → ACTUAL expenses/revenue (Accounts Payable, Payroll Post, Purchase Orders, etc.)
+   
+   BALANCE FORMULA:
+   Budget = SUM(CASE WHEN Source = 'BudgetProcessing' OR Source LIKE 'BA %' THEN Amount ELSE 0 END)
+   Expenses = SUM(CASE WHEN Source NOT IN ('BudgetProcessing') AND Source NOT LIKE 'BA %' THEN Amount ELSE 0 END)
+   Remaining = Budget - Expenses
+   
+   ALWAYS filter by FiscalEndYear (e.g., 2026) for current year data!`;
   }
 
   private async listTables(database: string): Promise<string> {
@@ -336,7 +494,7 @@ Look at the previous SQL to understand what entity/filter was used, and APPLY TH
 `;
     }
     
-    return `You are a data analyst with access to SQL databases. Answer questions by exploring the database structure and querying data.
+    return `You are a data analyst with access to SQL databases. Answer questions by querying data.
 
 CURRENT DATE: ${today} (Year: ${currentYear})
 When users mention "this year", "since January", etc., use ${currentYear}.
@@ -344,20 +502,19 @@ When users mention "this year", "since January", etc., use ${currentYear}.
 AVAILABLE TOOLS:
 ${toolDescriptions}
 
-HOW TO EXPLORE (like a data analyst would):
-1. If you don't know which database to use, call list_databases first
-2. Call list_tables to see what tables exist in a database
-3. Call describe_table to see columns in a table
-4. Call sample_values to understand what values exist in important columns (like status codes, types, categories)
-5. Once you understand the data, call run_query with a SQL query
-6. When you have the answer, call final_answer
+INSTRUCTIONS:
+You have COMPLETE domain knowledge below. DO NOT explore - go DIRECTLY to run_query!
 
-TIPS:
-- Explore incrementally - don't guess column names, look them up first
-- Sample values help you understand codes and categories (e.g., what does "EUTH" mean in outcome_type?)
-- If a query returns unexpected results, investigate further before answering
-- For counts, consider if there are status/location columns that might filter active vs inactive records
-- The cache will remember what you discover, so future queries will be faster
+FAST PATH (ALWAYS use this):
+1. Read domain knowledge → 2. run_query with SQL → 3. final_answer
+
+DO NOT call list_databases, list_tables, describe_table, or sample_values - you already have all the information you need!
+
+=== ANIMAL DATABASE DOMAIN KNOWLEDGE ===
+${ANIMAL_DB_KNOWLEDGE}
+
+=== LOGOS DATABASE DOMAIN KNOWLEDGE ===
+${LOGOS_DB_KNOWLEDGE}
 ${contextBlock}
 USER QUESTION: ${question}
 
@@ -391,10 +548,6 @@ When ready to answer, use final_answer tool.`;
     await onProgress?.('Understanding your question...', 0, MAX_ITERATIONS);
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
-      if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-      
       await onProgress?.(getProgressMessage('thinking', i), i + 1, MAX_ITERATIONS);
       
       const recentSteps = steps.slice(-6);
