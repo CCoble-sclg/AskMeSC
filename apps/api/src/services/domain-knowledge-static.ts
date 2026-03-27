@@ -155,6 +155,11 @@ LEFT JOIN HR.fn_GetEmployee_Base_ProjectedSalary_ByDate(GETDATE(), NULL) ePay ON
 | OrgGroupID | Primary key |
 | OrgGroupCodeDesc | Department name (e.g., "Elections", "Finance", "Public Works (Operating)") |
 
+IMPORTANT: When users ask about a department, use the FULL department name in OrgGroupCodeDesc.
+Common mappings:
+- "IT" = "Information Technology"
+- Do NOT use LIKE '%IT%' - use OrgGroupCodeDesc = 'Information Technology' or LIKE '%Information Technology%'
+
 ### HR.EmployeeDemographics (Personal Info)
 | Column | Description |
 |--------|-------------|
