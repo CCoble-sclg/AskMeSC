@@ -215,16 +215,42 @@ FORMATTING RULES:
     return { answer, sql };
   }
 
-  private async callAzureFunction(endpoint: string, body: Record<string, unknown>): Promise<any> {
-    const response = await fetch(`${this.env.AZURE_FUNCTION_URL}/api/${endpoint}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.env.AZURE_FUNCTION_KEY,
-      },
-      body: JSON.stringify(body),
-    });
-    return response.json();
+  private async callAzureFunction(endpoint: string, body: Record<string, unknown>, retries = 2): Promise<any> {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch(`${this.env.AZURE_FUNCTION_URL}/api/${endpoint}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': this.env.AZURE_FUNCTION_KEY,
+          },
+          body: JSON.stringify(body),
+        });
+        const result = await response.json();
+
+        const isRetryable = result.error && (
+          result.details?.includes('Failed to connect') ||
+          result.details?.includes('timeout') ||
+          result.details?.includes('ETIMEOUT') ||
+          response.status >= 500
+        );
+
+        if (isRetryable && attempt < retries) {
+          console.log(`Azure Function call failed (attempt ${attempt + 1}), retrying: ${result.details || result.error}`);
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+
+        return result;
+      } catch (e) {
+        if (attempt < retries) {
+          console.log(`Azure Function fetch failed (attempt ${attempt + 1}), retrying: ${e}`);
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        throw e;
+      }
+    }
   }
 
   private async listDatabases(): Promise<string> {

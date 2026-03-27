@@ -144,6 +144,14 @@ FROM dbo.JournalDetail WHERE GLAccountID = X AND FiscalEndYear = 2026
 | OrgGroupID | Primary key |
 | OrgGroupCodeDesc | Department name (e.g., "Elections", "Finance", "Public Works (Operating)") |
 
+### HR.EmployeeDemographics (Personal Info)
+| Column | Description |
+|--------|-------------|
+| EmployeeId | FK to Employee |
+| DateOfBirth | Date of birth (use this for age calculations, NOT BirthDate) |
+| vsGender | Gender code |
+| EmployeeSSN | SSN (do NOT select this - sensitive data) |
+
 ## CRITICAL: Getting Department Name for Employees
 
 To get department names, you MUST join through OrgStructure to OrgGroup:
