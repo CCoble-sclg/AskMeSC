@@ -220,7 +220,16 @@ PurchaseOrderID, PONumber, VendorID, FiscalYear, ProcessStatus
 ## Utility Billing Tables
 
 IMPORTANT: For utility billing questions (average bill, bill amounts, billing history),
-use the Utility tables below. Do NOT use JournalDetail for utility billing queries.
+use dbo.UTBillPrintHistory. Do NOT use JournalDetail or UtilityTransactionSummary for billing queries.
+
+### dbo.UTBillPrintHistory (PRIMARY table for billing queries)
+| Column | Description |
+|--------|-------------|
+| UtilityAccountID | FK to UtilityAccount |
+| BillingCycleID | Billing cycle identifier |
+| AmountDue | Total amount due on the bill |
+| CurrentCharges | Current period charges |
+| AccountType | Account type (e.g., 'Residential', 'Commercial') |
 
 ### dbo.UtilityAccount (Customer Accounts)
 | Column | Description |
@@ -229,60 +238,16 @@ use the Utility tables below. Do NOT use JournalDetail for utility billing queri
 | AccountNumber | Customer-facing account number |
 | AccountStatus | 1=Active, 2=Inactive |
 
-### dbo.UtilityTransactionHeader (Transaction Headers)
-| Column | Description |
-|--------|-------------|
-| UTTransHeaderID | Primary key |
-| BillingCycleID | FK to billing cycle |
-| TransactionType | 1=Bill, 3=Penalty |
-
-### dbo.UtilityTransactionSummary (Transaction Amounts)
-| Column | Description |
-|--------|-------------|
-| UTTransSummaryID | Primary key |
-| UTTransHeaderID | FK to UtilityTransactionHeader |
-| UtilityAccountID | FK to UtilityAccount |
-| ExceptionBillID | FK to ExceptionBills (for special bills) |
-| TransSummaryAmount | Dollar amount (the actual bill/payment amount) |
-| ParentUTTransSummaryID | Links payments to their parent bill |
-| Ver | Version (ALWAYS filter Ver = 1 for current records) |
-
-### dbo.BillingManager (Billing Cycle Dates)
-| Column | Description |
-|--------|-------------|
-| BillingCycleID | Billing cycle identifier |
-| BillingEventType | 1=Bill Date, 5=Statement Date |
-| EventDate | Date of the event |
-
 ## Key Utility Billing Queries
 
-Average bill amount per billing cycle:
-SELECT AVG(CycleBill) as AvgBillAmount, COUNT(*) as NumCycles
-FROM (
-  SELECT H.BillingCycleID, SUM(S.TransSummaryAmount) as CycleBill
-  FROM dbo.UtilityTransactionHeader H
-  JOIN dbo.UtilityTransactionSummary S ON S.UTTransHeaderID = H.UTTransHeaderID
-  WHERE H.TransactionType = 1 AND S.Ver = 1
-  GROUP BY H.BillingCycleID
-) bills
+Average/min/max utility bill:
+SELECT AVG(AmountDue) AS AvgBill, MIN(AmountDue) AS MinBill, MAX(AmountDue) AS MaxBill,
+  AVG(CurrentCharges) AS AvgCurrentCharges, COUNT(*) AS TotalBills
+FROM dbo.UTBillPrintHistory
 
-Average bill per customer account:
-SELECT AVG(AcctTotal) as AvgBillPerAccount
-FROM (
-  SELECT S.UtilityAccountID, SUM(S.TransSummaryAmount) as AcctTotal
-  FROM dbo.UtilityTransactionHeader H
-  JOIN dbo.UtilityTransactionSummary S ON S.UTTransHeaderID = H.UTTransHeaderID
-  WHERE H.TransactionType = 1 AND S.Ver = 1
-  GROUP BY S.UtilityAccountID
-) accts
-
-Bills by date range (using BillingManager for dates):
-SELECT BM.EventDate as BillDate, SUM(S.TransSummaryAmount) as TotalBilled
-FROM dbo.UtilityTransactionHeader H
-JOIN dbo.UtilityTransactionSummary S ON S.UTTransHeaderID = H.UTTransHeaderID
-JOIN dbo.BillingManager BM ON BM.BillingCycleID = H.BillingCycleID AND BM.BillingEventType = 1
-WHERE H.TransactionType = 1 AND S.Ver = 1
-  AND BM.EventDate >= '2026-01-01'
-GROUP BY BM.EventDate
-ORDER BY BM.EventDate
+Average bill for residential accounts only:
+SELECT AVG(AmountDue) AS AvgBill, MIN(AmountDue) AS MinBill, MAX(AmountDue) AS MaxBill,
+  AVG(CurrentCharges) AS AvgCurrentCharges, COUNT(*) AS TotalBills
+FROM dbo.UTBillPrintHistory
+WHERE AccountType = 'Residential'
 `;
